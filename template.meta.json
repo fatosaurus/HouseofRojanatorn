@@ -1,0 +1,5 @@
+{
+  "template_name": "azure-fullstack-base",
+  "description": "Generic Azure full-stack scaffold with auth, Cosmos, SQL, frontend login shell, and CI/CD workflows.",
+  "version": "1.0.0"
+}

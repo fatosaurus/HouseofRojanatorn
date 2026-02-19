@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AzureFunctionsVersion>V4</AzureFunctionsVersion>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.38.0" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker" Version="2.51.0" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.0.7" OutputItemType="Analyzer" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore" Version="2.1.0" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.4" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="7.7.1" />
+    <PackageReference Include="contrib.grpc.core.m1" Version="2.41.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$([MSBuild]::IsOSPlatform(OSX))' ">
+    <None Include="$(NuGetPackageRoot)contrib.grpc.core.m1/2.41.0/runtimes/osx-arm64/native/libgrpc_csharp_ext.arm64.dylib"
+          Link="runtimes/osx-arm64/native/libgrpc_csharp_ext.arm64.dylib"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="CopyGrpcNativeToFunctionsOutput" AfterTargets="Build" Condition=" '$([MSBuild]::IsOSPlatform(OSX))' ">
+    <ItemGroup>
+      <GrpcNative Include="$(TargetDir)runtimes/osx-arm64/native/libgrpc_csharp_ext.arm64.dylib" />
+    </ItemGroup>
+    <MakeDir Directories="$(MSBuildProjectDirectory)/bin/output/.azurefunctions/runtimes/osx-arm64/native"
+             Condition="Exists('%(GrpcNative.FullPath)')" />
+    <MakeDir Directories="$(MSBuildProjectDirectory)/bin/runtimes/osx-arm64/native"
+             Condition="Exists('%(GrpcNative.FullPath)')" />
+    <Copy SourceFiles="@(GrpcNative)"
+          DestinationFiles="$(MSBuildProjectDirectory)/bin/output/.azurefunctions/runtimes/osx-arm64/native/libgrpc_csharp_ext.arm64.dylib"
+          SkipUnchangedFiles="true"
+          Condition="Exists('%(GrpcNative.FullPath)')" />
+    <Copy SourceFiles="@(GrpcNative)"
+          DestinationFiles="$(MSBuildProjectDirectory)/bin/runtimes/osx-arm64/native/libgrpc_csharp_ext.arm64.dylib"
+          SkipUnchangedFiles="true"
+          Condition="Exists('%(GrpcNative.FullPath)')" />
+  </Target>
+</Project>

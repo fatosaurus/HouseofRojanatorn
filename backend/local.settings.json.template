@@ -1,0 +1,20 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "CosmosConnection": "<your-cosmos-connection-string>",
+    "Cosmos:ConnectionMode": "Gateway",
+    "CosmosDatabaseName": "houseofrojanatorn",
+    "SqlConnection": "<your-azure-sql-connection-string>",
+    "Cors:AllowedOrigins": "http://localhost:5173",
+    "Jwt:Issuer": "houseofrojanatorn",
+    "Jwt:Audience": "houseofrojanatorn-clients",
+    "Jwt:SigningKey": "<your-jwt-signing-key-32-bytes-min>",
+    "Jwt:ExpiryMinutes": "1440"
+  },
+  "Host": {
+    "CORS": "http://localhost:5173",
+    "CORSCredentials": true
+  }
+}
