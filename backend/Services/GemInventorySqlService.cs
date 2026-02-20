@@ -248,35 +248,38 @@ public sealed class GemInventorySqlService : IGemInventorySqlService
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(cancellationToken);
 
-        await using var cmd = new SqlCommand(itemSql, conn);
-        cmd.Parameters.AddWithValue("@Id", id);
-        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
+        InventoryItemDetailResponse item;
+        await using (var cmd = new SqlCommand(itemSql, conn))
         {
-            return null;
-        }
+            cmd.Parameters.AddWithValue("@Id", id);
+            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
 
-        var item = new InventoryItemDetailResponse
-        {
-            Id = GetInt32(reader, "id"),
-            GemstoneNumber = GetNullableInt32(reader, "gemstone_number"),
-            GemstoneNumberText = GetNullableString(reader, "gemstone_number_text"),
-            GemstoneType = GetNullableString(reader, "gemstone_type"),
-            Shape = GetNullableString(reader, "shape"),
-            WeightPcsRaw = GetNullableString(reader, "weight_pcs_raw"),
-            PricePerCtRaw = GetNullableString(reader, "price_per_ct_raw"),
-            PricePerPieceRaw = GetNullableString(reader, "price_per_piece_raw"),
-            BuyingDate = GetNullableDateTime(reader, "buying_date"),
-            OwnerName = GetNullableString(reader, "owner_name"),
-            BalancePcs = GetNullableDecimal(reader, "balance_pcs"),
-            BalanceCt = GetNullableDecimal(reader, "balance_ct"),
-            ParsedWeightCt = GetNullableDecimal(reader, "parsed_weight_ct"),
-            ParsedQuantityPcs = GetNullableDecimal(reader, "parsed_quantity_pcs"),
-            ParsedPricePerCt = GetNullableDecimal(reader, "parsed_price_per_ct"),
-            ParsedPricePerPiece = GetNullableDecimal(reader, "parsed_price_per_piece"),
-            EffectiveBalancePcs = GetDecimal(reader, "effective_balance_pcs"),
-            EffectiveBalanceCt = GetDecimal(reader, "effective_balance_ct"),
-        };
+            item = new InventoryItemDetailResponse
+            {
+                Id = GetInt32(reader, "id"),
+                GemstoneNumber = GetNullableInt32(reader, "gemstone_number"),
+                GemstoneNumberText = GetNullableString(reader, "gemstone_number_text"),
+                GemstoneType = GetNullableString(reader, "gemstone_type"),
+                Shape = GetNullableString(reader, "shape"),
+                WeightPcsRaw = GetNullableString(reader, "weight_pcs_raw"),
+                PricePerCtRaw = GetNullableString(reader, "price_per_ct_raw"),
+                PricePerPieceRaw = GetNullableString(reader, "price_per_piece_raw"),
+                BuyingDate = GetNullableDateTime(reader, "buying_date"),
+                OwnerName = GetNullableString(reader, "owner_name"),
+                BalancePcs = GetNullableDecimal(reader, "balance_pcs"),
+                BalanceCt = GetNullableDecimal(reader, "balance_ct"),
+                ParsedWeightCt = GetNullableDecimal(reader, "parsed_weight_ct"),
+                ParsedQuantityPcs = GetNullableDecimal(reader, "parsed_quantity_pcs"),
+                ParsedPricePerCt = GetNullableDecimal(reader, "parsed_price_per_ct"),
+                ParsedPricePerPiece = GetNullableDecimal(reader, "parsed_price_per_piece"),
+                EffectiveBalancePcs = GetDecimal(reader, "effective_balance_pcs"),
+                EffectiveBalanceCt = GetDecimal(reader, "effective_balance_ct"),
+            };
+        }
 
         var usageActivities = new List<InventoryUsageActivityResponse>();
         await using (var usageCmd = new SqlCommand(usageActivitySql, conn))
