@@ -56,3 +56,16 @@ Dry run (parse only):
 ```bash
 python3 tools/db/import_stock_workbook.py --dry-run
 ```
+
+## Rebuild Manufacturing From Usage Import
+
+Use this when usage batches/lines should be treated as manufacturing records:
+
+```bash
+dotnet run --project tools/db/SqlRunner -- --file tools/db/rebuild_manufacturing_from_usage.sql
+```
+
+Mapping highlights:
+- `gem_usage_batches.product_code` -> `manufacturing_projects.manufacturing_code`
+- batch totals + line totals -> manufacturing cost fields
+- `gem_usage_lines` -> `manufacturing_project_gemstones` (including line notes for detail view)
