@@ -320,85 +320,107 @@ export function ManufacturingPanel() {
       </section>
 
       {selected ? (
-        <section className="detail-drawer">
-          <div className="drawer-head">
-            <h3>{selected.manufacturingCode} · {selected.pieceName}</h3>
-            <button type="button" className="secondary-btn" onClick={() => setSelected(null)}>Close</button>
-          </div>
-
-          <div className="drawer-grid">
-            <p><strong>Type:</strong> {labelize(selected.pieceType)}</p>
-            <p><strong>Status:</strong> {labelize(selected.status)}</p>
-            <p><strong>Designer:</strong> {selected.designerName ?? '-'}</p>
-            <p><strong>Craftsman:</strong> {selected.craftsmanName ?? '-'}</p>
-            <p><strong>Selling Price:</strong> {formatCurrency(selected.sellingPrice)}</p>
-            <p><strong>Total Cost:</strong> {formatCurrency(selected.totalCost)}</p>
-            <p><strong>Design Date:</strong> {formatDate(selected.designDate)}</p>
-            <p><strong>Completion Date:</strong> {formatDate(selected.completionDate)}</p>
-            <p><strong>Customer:</strong> {selected.customerName ?? '-'}</p>
-            <p><strong>Sold At:</strong> {formatDate(selected.soldAt)}</p>
-          </div>
-
-          <div className="status-update-row">
-            <select value={selectedStatus} onChange={event => setSelectedStatus(event.target.value)}>
-              {STATUS_OPTIONS.map(status => (
-                <option key={status} value={status}>{labelize(status)}</option>
-              ))}
-            </select>
-            <button type="button" className="primary-btn" onClick={() => void handleUpdateStatus()} disabled={isSaving || selectedStatus === selected.status}>
-              {isSaving ? 'Updating...' : 'Update Status'}
-            </button>
-          </div>
-
-          {selected.usageNotes ? (
-            <div className="usage-lines">
-              <h4>Notes</h4>
-              <p>{selected.usageNotes}</p>
+        <div className="detail-modal-backdrop" onClick={() => setSelected(null)}>
+          <section className="detail-modal-panel" onClick={event => event.stopPropagation()}>
+            <div className="drawer-head">
+              <h3>{selected.manufacturingCode} · {selected.pieceName}</h3>
+              <button type="button" className="secondary-btn" onClick={() => setSelected(null)}>Close</button>
             </div>
-          ) : null}
 
-          <div className="usage-lines">
-            <h4>Gemstones</h4>
-            {selected.gemstones.length === 0 ? (
-              <p className="panel-placeholder">No gemstones linked yet.</p>
-            ) : (
-              <div className="activity-list">
-                {selected.gemstones.map(gem => (
-                  <article key={gem.id}>
-                    <p>
-                      <strong>{gem.gemstoneCode ?? `#${gem.inventoryItemId ?? '?'}`}</strong>
-                      {' • '}
-                      {gem.gemstoneType ?? 'Unknown'}
-                    </p>
-                    <p>{gem.weightUsedCt} ct / {gem.piecesUsed} pcs</p>
-                    <p>{formatCurrency(gem.lineCost)}</p>
-                    {gem.notes ? <p>{gem.notes}</p> : null}
-                  </article>
-                ))}
-              </div>
-            )}
-          </div>
+            <div className="drawer-grid">
+              <p><strong>Type:</strong> {labelize(selected.pieceType)}</p>
+              <p><strong>Status:</strong> {labelize(selected.status)}</p>
+              <p><strong>Design Date:</strong> {formatDate(selected.designDate)}</p>
+              <p><strong>Completion Date:</strong> {formatDate(selected.completionDate)}</p>
+              <p><strong>Designer:</strong> {selected.designerName ?? '-'}</p>
+              <p><strong>Craftsman:</strong> {selected.craftsmanName ?? '-'}</p>
+              <p><strong>Metal Plating:</strong> {selected.metalPlating.length > 0 ? selected.metalPlating.map(value => labelize(value)).join(', ') : '-'}</p>
+              <p><strong>Plating Notes:</strong> {selected.metalPlatingNotes ?? '-'}</p>
+              <p><strong>Setting Cost:</strong> {formatCurrency(selected.settingCost)}</p>
+              <p><strong>Diamond Cost:</strong> {formatCurrency(selected.diamondCost)}</p>
+              <p><strong>Gemstone Cost:</strong> {formatCurrency(selected.gemstoneCost)}</p>
+              <p><strong>Selling Price:</strong> {formatCurrency(selected.sellingPrice)}</p>
+              <p><strong>Total Cost:</strong> {formatCurrency(selected.totalCost)}</p>
+              <p><strong>Customer:</strong> {selected.customerName ?? '-'}</p>
+              <p><strong>Sold At:</strong> {formatDate(selected.soldAt)}</p>
+              <p><strong>Created:</strong> {formatDate(selected.createdAtUtc)}</p>
+              <p><strong>Updated:</strong> {formatDate(selected.updatedAtUtc)}</p>
+            </div>
 
-          <div className="usage-lines">
-            <h4>Activity Log</h4>
-            {selected.activityLog.length === 0 ? (
-              <p className="panel-placeholder">No activity entries yet.</p>
-            ) : (
-              <div className="activity-list">
-                {selected.activityLog.map(entry => (
-                  <article key={entry.id}>
-                    <p>
-                      <strong>{labelize(entry.status)}</strong>
-                      {' • '}
-                      {formatDate(entry.activityAtUtc)}
-                    </p>
-                    {entry.notes ? <p>{entry.notes}</p> : null}
-                  </article>
+            <div className="status-update-row">
+              <select value={selectedStatus} onChange={event => setSelectedStatus(event.target.value)}>
+                {STATUS_OPTIONS.map(status => (
+                  <option key={status} value={status}>{labelize(status)}</option>
                 ))}
+              </select>
+              <button type="button" className="primary-btn" onClick={() => void handleUpdateStatus()} disabled={isSaving || selectedStatus === selected.status}>
+                {isSaving ? 'Updating...' : 'Update Status'}
+              </button>
+            </div>
+
+            {selected.usageNotes ? (
+              <div className="usage-lines">
+                <h4>Notes</h4>
+                <p>{selected.usageNotes}</p>
               </div>
-            )}
-          </div>
-        </section>
+            ) : null}
+
+            {selected.photos.length > 0 ? (
+              <div className="usage-lines">
+                <h4>Photos</h4>
+                <div className="activity-list">
+                  {selected.photos.map((photo, index) => (
+                    <article key={`${photo}-${index}`}>
+                      <a href={photo} target="_blank" rel="noreferrer">{photo}</a>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="usage-lines">
+              <h4>Gemstones</h4>
+              {selected.gemstones.length === 0 ? (
+                <p className="panel-placeholder">No gemstones linked yet.</p>
+              ) : (
+                <div className="activity-list">
+                  {selected.gemstones.map(gem => (
+                    <article key={gem.id}>
+                      <p>
+                        <strong>{gem.gemstoneCode ?? `#${gem.inventoryItemId ?? '?'}`}</strong>
+                        {' • '}
+                        {gem.gemstoneType ?? 'Unknown'}
+                      </p>
+                      <p>{gem.weightUsedCt} ct / {gem.piecesUsed} pcs</p>
+                      <p>{formatCurrency(gem.lineCost)}</p>
+                      {gem.notes ? <p>{gem.notes}</p> : null}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="usage-lines">
+              <h4>Activity Log</h4>
+              {selected.activityLog.length === 0 ? (
+                <p className="panel-placeholder">No activity entries yet.</p>
+              ) : (
+                <div className="activity-list">
+                  {selected.activityLog.map(entry => (
+                    <article key={entry.id}>
+                      <p>
+                        <strong>{labelize(entry.status)}</strong>
+                        {' • '}
+                        {formatDate(entry.activityAtUtc)}
+                      </p>
+                      {entry.notes ? <p>{entry.notes}</p> : null}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       ) : null}
     </>
   )

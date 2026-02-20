@@ -14,7 +14,7 @@ public interface IGemInventorySqlService
         int limit,
         int offset,
         CancellationToken cancellationToken = default);
-    Task<InventoryItemResponse?> GetInventoryItemByIdAsync(int id, CancellationToken cancellationToken = default);
+    Task<InventoryItemDetailResponse?> GetInventoryItemByIdAsync(int id, CancellationToken cancellationToken = default);
     Task<PagedResponse<UsageBatchResponse>> GetUsageBatchesAsync(
         string? search,
         string? category,
@@ -166,9 +166,9 @@ public sealed class GemInventorySqlService : IGemInventorySqlService
         return new PagedResponse<InventoryItemResponse>(items, totalCount, limit, offset);
     }
 
-    public async Task<InventoryItemResponse?> GetInventoryItemByIdAsync(int id, CancellationToken cancellationToken = default)
+    public async Task<InventoryItemDetailResponse?> GetInventoryItemByIdAsync(int id, CancellationToken cancellationToken = default)
     {
-        const string sql = """
+        const string itemSql = """
             SELECT
                 id,
                 gemstone_number,
@@ -192,10 +192,62 @@ public sealed class GemInventorySqlService : IGemInventorySqlService
             WHERE id = @Id;
             """;
 
+        const string usageActivitySql = """
+            SELECT
+                l.id AS line_id,
+                b.id AS batch_id,
+                b.transaction_date,
+                b.product_code,
+                b.product_category,
+                COALESCE(l.requester_name, b.requester_name) AS requester_name,
+                l.used_pcs,
+                l.used_weight_ct,
+                l.line_amount,
+                l.balance_pcs_after,
+                l.balance_ct_after
+            FROM dbo.gem_usage_lines l
+            INNER JOIN dbo.gem_usage_batches b
+                ON b.id = l.batch_id
+            WHERE @GemstoneNumber IS NOT NULL
+              AND l.gemstone_number = @GemstoneNumber
+            ORDER BY b.transaction_date DESC, b.id DESC, l.id DESC;
+            """;
+
+        const string manufacturingActivitySql = """
+            WITH linked AS (
+                SELECT
+                    project_id,
+                    SUM(pieces_used) AS pieces_used,
+                    SUM(weight_used_ct) AS weight_used_ct,
+                    SUM(line_cost) AS line_cost
+                FROM dbo.manufacturing_project_gemstones
+                WHERE inventory_item_id = @InventoryItemId
+                GROUP BY project_id
+            )
+            SELECT
+                mp.id AS project_id,
+                mp.manufacturing_code,
+                mp.piece_name,
+                mp.piece_type,
+                COALESCE(mal.status, mp.status) AS status,
+                COALESCE(mal.activity_at_utc, mp.updated_at_utc) AS activity_at_utc,
+                COALESCE(mal.craftsman_name, mp.craftsman_name) AS craftsman_name,
+                COALESCE(mal.notes, mp.usage_notes) AS notes,
+                linked.pieces_used,
+                linked.weight_used_ct,
+                linked.line_cost
+            FROM linked
+            INNER JOIN dbo.manufacturing_projects mp
+                ON mp.id = linked.project_id
+            LEFT JOIN dbo.manufacturing_activity_log mal
+                ON mal.project_id = mp.id
+            ORDER BY COALESCE(mal.activity_at_utc, mp.updated_at_utc) DESC, mp.id DESC, mal.id DESC;
+            """;
+
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(cancellationToken);
 
-        await using var cmd = new SqlCommand(sql, conn);
+        await using var cmd = new SqlCommand(itemSql, conn);
         cmd.Parameters.AddWithValue("@Id", id);
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
@@ -203,7 +255,7 @@ public sealed class GemInventorySqlService : IGemInventorySqlService
             return null;
         }
 
-        return new InventoryItemResponse
+        var item = new InventoryItemDetailResponse
         {
             Id = GetInt32(reader, "id"),
             GemstoneNumber = GetNullableInt32(reader, "gemstone_number"),
@@ -223,6 +275,78 @@ public sealed class GemInventorySqlService : IGemInventorySqlService
             ParsedPricePerPiece = GetNullableDecimal(reader, "parsed_price_per_piece"),
             EffectiveBalancePcs = GetDecimal(reader, "effective_balance_pcs"),
             EffectiveBalanceCt = GetDecimal(reader, "effective_balance_ct"),
+        };
+
+        var usageActivities = new List<InventoryUsageActivityResponse>();
+        await using (var usageCmd = new SqlCommand(usageActivitySql, conn))
+        {
+            usageCmd.Parameters.AddWithValue("@GemstoneNumber", item.GemstoneNumber is null ? DBNull.Value : item.GemstoneNumber);
+            await using var usageReader = await usageCmd.ExecuteReaderAsync(cancellationToken);
+            while (await usageReader.ReadAsync(cancellationToken))
+            {
+                usageActivities.Add(new InventoryUsageActivityResponse
+                {
+                    LineId = GetInt32(usageReader, "line_id"),
+                    BatchId = GetInt32(usageReader, "batch_id"),
+                    TransactionDate = GetNullableDateTime(usageReader, "transaction_date"),
+                    ProductCode = GetNullableString(usageReader, "product_code"),
+                    ProductCategory = GetString(usageReader, "product_category"),
+                    RequesterName = GetNullableString(usageReader, "requester_name"),
+                    UsedPcs = GetNullableDecimal(usageReader, "used_pcs"),
+                    UsedWeightCt = GetNullableDecimal(usageReader, "used_weight_ct"),
+                    LineAmount = GetNullableDecimal(usageReader, "line_amount"),
+                    BalancePcsAfter = GetNullableDecimal(usageReader, "balance_pcs_after"),
+                    BalanceCtAfter = GetNullableDecimal(usageReader, "balance_ct_after"),
+                });
+            }
+        }
+
+        var manufacturingActivities = new List<InventoryManufacturingActivityResponse>();
+        await using (var manufacturingCmd = new SqlCommand(manufacturingActivitySql, conn))
+        {
+            manufacturingCmd.Parameters.AddWithValue("@InventoryItemId", id);
+            await using var manufacturingReader = await manufacturingCmd.ExecuteReaderAsync(cancellationToken);
+            while (await manufacturingReader.ReadAsync(cancellationToken))
+            {
+                manufacturingActivities.Add(new InventoryManufacturingActivityResponse
+                {
+                    ProjectId = GetInt32(manufacturingReader, "project_id"),
+                    ManufacturingCode = GetString(manufacturingReader, "manufacturing_code"),
+                    PieceName = GetString(manufacturingReader, "piece_name"),
+                    PieceType = GetNullableString(manufacturingReader, "piece_type"),
+                    Status = GetString(manufacturingReader, "status"),
+                    ActivityAtUtc = GetNullableDateTime(manufacturingReader, "activity_at_utc"),
+                    CraftsmanName = GetNullableString(manufacturingReader, "craftsman_name"),
+                    Notes = GetNullableString(manufacturingReader, "notes"),
+                    PiecesUsed = GetDecimal(manufacturingReader, "pieces_used"),
+                    WeightUsedCt = GetDecimal(manufacturingReader, "weight_used_ct"),
+                    LineCost = GetDecimal(manufacturingReader, "line_cost"),
+                });
+            }
+        }
+
+        return new InventoryItemDetailResponse
+        {
+            Id = item.Id,
+            GemstoneNumber = item.GemstoneNumber,
+            GemstoneNumberText = item.GemstoneNumberText,
+            GemstoneType = item.GemstoneType,
+            Shape = item.Shape,
+            WeightPcsRaw = item.WeightPcsRaw,
+            PricePerCtRaw = item.PricePerCtRaw,
+            PricePerPieceRaw = item.PricePerPieceRaw,
+            BuyingDate = item.BuyingDate,
+            OwnerName = item.OwnerName,
+            BalancePcs = item.BalancePcs,
+            BalanceCt = item.BalanceCt,
+            ParsedWeightCt = item.ParsedWeightCt,
+            ParsedQuantityPcs = item.ParsedQuantityPcs,
+            ParsedPricePerCt = item.ParsedPricePerCt,
+            ParsedPricePerPiece = item.ParsedPricePerPiece,
+            EffectiveBalancePcs = item.EffectiveBalancePcs,
+            EffectiveBalanceCt = item.EffectiveBalanceCt,
+            UsageActivities = usageActivities,
+            ManufacturingActivities = manufacturingActivities,
         };
     }
 
