@@ -2,10 +2,19 @@ import { env } from '../lib/env'
 import { fetchJson } from '../lib/http'
 import type { AppRole } from '../types/role'
 import type {
+  AnalyticsOverview,
   AuthResponse,
+  Customer,
+  CustomerActivity,
+  CustomerUpsertRequest,
   InventoryItem,
   InventorySummary,
   MeProfile,
+  ManufacturingActivityLog,
+  ManufacturingGemstone,
+  ManufacturingProjectDetail,
+  ManufacturingProjectSummary,
+  ManufacturingProjectUpsertRequest,
   PagedResponse,
   UsageBatch,
   UsageBatchDetail,
@@ -164,6 +173,173 @@ function mapUsageBatchDetail(record: UnknownRecord): UsageBatchDetail {
   }
 }
 
+function readStringArray(record: UnknownRecord, camel: string, pascal: string): string[] {
+  const value = pick<unknown>(record, camel, pascal)
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map(item => String(item ?? '').trim())
+    .filter(item => item.length > 0)
+}
+
+function mapCustomer(record: UnknownRecord): Customer {
+  return {
+    id: String(pick<string>(record, 'id', 'Id') ?? ''),
+    name: readString(record, 'name', 'Name') ?? '',
+    nickname: readString(record, 'nickname', 'Nickname'),
+    email: readString(record, 'email', 'Email'),
+    phone: readString(record, 'phone', 'Phone'),
+    address: readString(record, 'address', 'Address'),
+    notes: readString(record, 'notes', 'Notes'),
+    photoUrl: readString(record, 'photoUrl', 'PhotoUrl'),
+    customerSince: readString(record, 'customerSince', 'CustomerSince'),
+    createdAtUtc: readString(record, 'createdAtUtc', 'CreatedAtUtc') ?? '',
+    updatedAtUtc: readString(record, 'updatedAtUtc', 'UpdatedAtUtc') ?? '',
+    totalSpent: readNumber(record, 'totalSpent', 'TotalSpent') ?? 0,
+    purchaseCount: readNumber(record, 'purchaseCount', 'PurchaseCount') ?? 0
+  }
+}
+
+function mapCustomerActivity(record: UnknownRecord): CustomerActivity {
+  return {
+    id: readNumber(record, 'id', 'Id') ?? 0,
+    projectId: readNumber(record, 'projectId', 'ProjectId') ?? 0,
+    manufacturingCode: readString(record, 'manufacturingCode', 'ManufacturingCode') ?? '',
+    pieceName: readString(record, 'pieceName', 'PieceName') ?? '',
+    status: readString(record, 'status', 'Status') ?? '',
+    activityAtUtc: readString(record, 'activityAtUtc', 'ActivityAtUtc') ?? '',
+    craftsmanName: readString(record, 'craftsmanName', 'CraftsmanName'),
+    notes: readString(record, 'notes', 'Notes')
+  }
+}
+
+function mapManufacturingGemstone(record: UnknownRecord): ManufacturingGemstone {
+  return {
+    id: readNumber(record, 'id', 'Id') ?? 0,
+    inventoryItemId: readNumber(record, 'inventoryItemId', 'InventoryItemId'),
+    gemstoneCode: readString(record, 'gemstoneCode', 'GemstoneCode'),
+    gemstoneType: readString(record, 'gemstoneType', 'GemstoneType'),
+    piecesUsed: readNumber(record, 'piecesUsed', 'PiecesUsed') ?? 0,
+    weightUsedCt: readNumber(record, 'weightUsedCt', 'WeightUsedCt') ?? 0,
+    lineCost: readNumber(record, 'lineCost', 'LineCost') ?? 0,
+    notes: readString(record, 'notes', 'Notes')
+  }
+}
+
+function mapManufacturingActivity(record: UnknownRecord): ManufacturingActivityLog {
+  return {
+    id: readNumber(record, 'id', 'Id') ?? 0,
+    status: readString(record, 'status', 'Status') ?? '',
+    activityAtUtc: readString(record, 'activityAtUtc', 'ActivityAtUtc') ?? '',
+    craftsmanName: readString(record, 'craftsmanName', 'CraftsmanName'),
+    notes: readString(record, 'notes', 'Notes')
+  }
+}
+
+function mapManufacturingSummary(record: UnknownRecord): ManufacturingProjectSummary {
+  return {
+    id: readNumber(record, 'id', 'Id') ?? 0,
+    manufacturingCode: readString(record, 'manufacturingCode', 'ManufacturingCode') ?? '',
+    pieceName: readString(record, 'pieceName', 'PieceName') ?? '',
+    pieceType: readString(record, 'pieceType', 'PieceType'),
+    designDate: readString(record, 'designDate', 'DesignDate'),
+    designerName: readString(record, 'designerName', 'DesignerName'),
+    status: readString(record, 'status', 'Status') ?? '',
+    craftsmanName: readString(record, 'craftsmanName', 'CraftsmanName'),
+    metalPlating: readStringArray(record, 'metalPlating', 'MetalPlating'),
+    settingCost: readNumber(record, 'settingCost', 'SettingCost') ?? 0,
+    diamondCost: readNumber(record, 'diamondCost', 'DiamondCost') ?? 0,
+    gemstoneCost: readNumber(record, 'gemstoneCost', 'GemstoneCost') ?? 0,
+    totalCost: readNumber(record, 'totalCost', 'TotalCost') ?? 0,
+    sellingPrice: readNumber(record, 'sellingPrice', 'SellingPrice') ?? 0,
+    completionDate: readString(record, 'completionDate', 'CompletionDate'),
+    customerId: readString(record, 'customerId', 'CustomerId'),
+    customerName: readString(record, 'customerName', 'CustomerName'),
+    soldAt: readString(record, 'soldAt', 'SoldAt'),
+    createdAtUtc: readString(record, 'createdAtUtc', 'CreatedAtUtc') ?? '',
+    updatedAtUtc: readString(record, 'updatedAtUtc', 'UpdatedAtUtc') ?? '',
+    gemstoneCount: readNumber(record, 'gemstoneCount', 'GemstoneCount') ?? 0
+  }
+}
+
+function mapManufacturingDetail(record: UnknownRecord): ManufacturingProjectDetail {
+  const rawGemstones = pick<unknown[]>(record, 'gemstones', 'Gemstones') ?? []
+  const rawActivity = pick<unknown[]>(record, 'activityLog', 'ActivityLog') ?? []
+
+  return {
+    id: readNumber(record, 'id', 'Id') ?? 0,
+    manufacturingCode: readString(record, 'manufacturingCode', 'ManufacturingCode') ?? '',
+    pieceName: readString(record, 'pieceName', 'PieceName') ?? '',
+    pieceType: readString(record, 'pieceType', 'PieceType'),
+    designDate: readString(record, 'designDate', 'DesignDate'),
+    designerName: readString(record, 'designerName', 'DesignerName'),
+    status: readString(record, 'status', 'Status') ?? '',
+    craftsmanName: readString(record, 'craftsmanName', 'CraftsmanName'),
+    metalPlating: readStringArray(record, 'metalPlating', 'MetalPlating'),
+    metalPlatingNotes: readString(record, 'metalPlatingNotes', 'MetalPlatingNotes'),
+    settingCost: readNumber(record, 'settingCost', 'SettingCost') ?? 0,
+    diamondCost: readNumber(record, 'diamondCost', 'DiamondCost') ?? 0,
+    gemstoneCost: readNumber(record, 'gemstoneCost', 'GemstoneCost') ?? 0,
+    totalCost: readNumber(record, 'totalCost', 'TotalCost') ?? 0,
+    sellingPrice: readNumber(record, 'sellingPrice', 'SellingPrice') ?? 0,
+    completionDate: readString(record, 'completionDate', 'CompletionDate'),
+    usageNotes: readString(record, 'usageNotes', 'UsageNotes'),
+    photos: readStringArray(record, 'photos', 'Photos'),
+    customerId: readString(record, 'customerId', 'CustomerId'),
+    customerName: readString(record, 'customerName', 'CustomerName'),
+    soldAt: readString(record, 'soldAt', 'SoldAt'),
+    createdAtUtc: readString(record, 'createdAtUtc', 'CreatedAtUtc') ?? '',
+    updatedAtUtc: readString(record, 'updatedAtUtc', 'UpdatedAtUtc') ?? '',
+    gemstones: rawGemstones
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(mapManufacturingGemstone),
+    activityLog: rawActivity
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(mapManufacturingActivity)
+  }
+}
+
+function mapAnalyticsOverview(record: UnknownRecord): AnalyticsOverview {
+  const rawCurrentMonth = pick<UnknownRecord>(record, 'currentMonth', 'CurrentMonth') ?? {}
+  const rawTotals = pick<UnknownRecord>(record, 'totals', 'Totals') ?? {}
+  const rawMonthly = pick<unknown[]>(record, 'monthlyRevenue', 'MonthlyRevenue') ?? []
+  const rawTopCustomers = pick<unknown[]>(record, 'topCustomers', 'TopCustomers') ?? []
+
+  return {
+    currentMonth: {
+      revenue: readNumber(rawCurrentMonth, 'revenue', 'Revenue') ?? 0,
+      transactions: readNumber(rawCurrentMonth, 'transactions', 'Transactions') ?? 0,
+      startDateUtc: readString(rawCurrentMonth, 'startDateUtc', 'StartDateUtc') ?? ''
+    },
+    totals: {
+      revenue: readNumber(rawTotals, 'revenue', 'Revenue') ?? 0,
+      orders: readNumber(rawTotals, 'orders', 'Orders') ?? 0,
+      avgOrderValue: readNumber(rawTotals, 'avgOrderValue', 'AvgOrderValue') ?? 0,
+      customers: readNumber(rawTotals, 'customers', 'Customers') ?? 0,
+      customersWithPurchases: readNumber(rawTotals, 'customersWithPurchases', 'CustomersWithPurchases') ?? 0
+    },
+    monthlyRevenue: rawMonthly
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(point => ({
+        month: readString(point, 'month', 'Month') ?? '',
+        revenue: readNumber(point, 'revenue', 'Revenue') ?? 0,
+        customers: readNumber(point, 'customers', 'Customers') ?? 0,
+        orders: readNumber(point, 'orders', 'Orders') ?? 0
+      })),
+    topCustomers: rawTopCustomers
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(point => ({
+        customerId: readString(point, 'customerId', 'CustomerId') ?? '',
+        customerName: readString(point, 'customerName', 'CustomerName') ?? '',
+        totalSpent: readNumber(point, 'totalSpent', 'TotalSpent') ?? 0,
+        purchases: readNumber(point, 'purchases', 'Purchases') ?? 0,
+        lastPurchaseUtc: readString(point, 'lastPurchaseUtc', 'LastPurchaseUtc') ?? ''
+      }))
+  }
+}
+
 export async function loginUser(email: string, password: string): Promise<AuthResponse> {
   const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/login`, {
     method: 'POST',
@@ -240,4 +416,120 @@ export async function getUsageBatches(query: UsageQuery): Promise<PagedResponse<
 export async function getUsageBatch(id: number): Promise<UsageBatchDetail> {
   const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/inventory/usage/${id}`)
   return mapUsageBatchDetail(response)
+}
+
+export interface CustomersQuery {
+  search?: string
+  limit?: number
+  offset?: number
+}
+
+export async function getCustomers(query: CustomersQuery): Promise<PagedResponse<Customer>> {
+  const params = new URLSearchParams()
+  if (query.search?.trim()) params.set('search', query.search.trim())
+  if (typeof query.limit === 'number') params.set('limit', String(query.limit))
+  if (typeof query.offset === 'number') params.set('offset', String(query.offset))
+  const suffix = params.toString() ? `?${params}` : ''
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/customers${suffix}`)
+  return mapPagedResponse(response, mapCustomer)
+}
+
+export async function getCustomer(id: string): Promise<Customer> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/customers/${encodeURIComponent(id)}`)
+  return mapCustomer(response)
+}
+
+export async function createCustomer(payload: CustomerUpsertRequest): Promise<Customer> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/customers`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+  return mapCustomer(response)
+}
+
+export async function updateCustomer(id: string, payload: CustomerUpsertRequest): Promise<Customer> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/customers/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  })
+  return mapCustomer(response)
+}
+
+export async function deleteCustomer(id: string): Promise<void> {
+  await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/customers/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  })
+}
+
+export async function addCustomerNote(id: string, note: string): Promise<Customer | null> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/customers/${encodeURIComponent(id)}/notes`, {
+    method: 'POST',
+    body: JSON.stringify({ note })
+  })
+
+  const rawCustomer = pick<UnknownRecord>(response, 'customer', 'Customer')
+  if (!rawCustomer) {
+    return null
+  }
+  return mapCustomer(rawCustomer)
+}
+
+export async function getCustomerActivity(id: string, limit = 100): Promise<CustomerActivity[]> {
+  const response = await fetchJson<unknown[]>(`${env.apiBaseUrl}/customers/${encodeURIComponent(id)}/activity?limit=${limit}`)
+  return response
+    .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+    .map(mapCustomerActivity)
+}
+
+export interface ManufacturingQuery {
+  search?: string
+  status?: string
+  customerId?: string
+  limit?: number
+  offset?: number
+}
+
+export async function getManufacturingProjects(query: ManufacturingQuery): Promise<PagedResponse<ManufacturingProjectSummary>> {
+  const params = new URLSearchParams()
+  if (query.search?.trim()) params.set('search', query.search.trim())
+  if (query.status?.trim() && query.status !== 'all') params.set('status', query.status.trim())
+  if (query.customerId?.trim()) params.set('customer_id', query.customerId.trim())
+  if (typeof query.limit === 'number') params.set('limit', String(query.limit))
+  if (typeof query.offset === 'number') params.set('offset', String(query.offset))
+
+  const suffix = params.toString() ? `?${params}` : ''
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing${suffix}`)
+  return mapPagedResponse(response, mapManufacturingSummary)
+}
+
+export async function getManufacturingProject(id: number): Promise<ManufacturingProjectDetail> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing/${id}`)
+  return mapManufacturingDetail(response)
+}
+
+export async function createManufacturingProject(payload: ManufacturingProjectUpsertRequest): Promise<ManufacturingProjectDetail> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+  return mapManufacturingDetail(response)
+}
+
+export async function updateManufacturingProject(id: number, payload: ManufacturingProjectUpsertRequest): Promise<ManufacturingProjectDetail> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  })
+  return mapManufacturingDetail(response)
+}
+
+export async function deleteManufacturingProject(id: number): Promise<void> {
+  await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing/${id}`, {
+    method: 'DELETE'
+  })
+}
+
+export async function getAnalyticsOverview(): Promise<AnalyticsOverview> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/analytics`)
+  return mapAnalyticsOverview(response)
 }

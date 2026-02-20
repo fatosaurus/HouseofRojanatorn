@@ -105,6 +105,73 @@ def main() -> int:
         expect(status == 200, f'GET /inventory/usage/{{id}} expected 200, got {status}: {usage_detail}')
         expect(isinstance(usage_detail, dict), '/inventory/usage/{id} response must be object')
 
+    status, customers_page = http_json('GET', f'{base_url}/customers?limit=5&offset=0', token=token)
+    expect(status == 200, f'GET /customers expected 200, got {status}: {customers_page}')
+    expect(isinstance(customers_page, dict), '/customers response must be object')
+    customers_items = pick(customers_page, 'items', 'Items')
+    expect(isinstance(customers_items, list), '/customers.items must be array')
+
+    customer_payload = {
+        'name': f'Smoke Customer {smoke_id}',
+        'email': f'customer.{smoke_id}@example.local',
+        'phone': '+66-800000000',
+        'notes': 'Created by API smoke'
+    }
+    status, customer_created = http_json('POST', f'{base_url}/customers', token=token, body=customer_payload)
+    expect(status == 201, f'POST /customers expected 201, got {status}: {customer_created}')
+    expect(isinstance(customer_created, dict), '/customers POST response must be object')
+    customer_id = pick(customer_created, 'id', 'Id')
+    expect(isinstance(customer_id, str) and len(customer_id) >= 32, 'Created customer id must be string guid')
+
+    status, customer_detail = http_json('GET', f'{base_url}/customers/{customer_id}', token=token)
+    expect(status == 200, f'GET /customers/{{id}} expected 200, got {status}: {customer_detail}')
+    expect(isinstance(customer_detail, dict), '/customers/{id} response must be object')
+
+    status, customer_note = http_json('POST', f'{base_url}/customers/{customer_id}/notes', token=token, body={'note': 'Smoke note'})
+    expect(status == 200, f'POST /customers/{{id}}/notes expected 200, got {status}: {customer_note}')
+
+    status, customer_activity = http_json('GET', f'{base_url}/customers/{customer_id}/activity?limit=10', token=token)
+    expect(status == 200, f'GET /customers/{{id}}/activity expected 200, got {status}: {customer_activity}')
+    expect(isinstance(customer_activity, list), '/customers/{id}/activity response must be array')
+
+    status, manufacturing_page = http_json('GET', f'{base_url}/manufacturing?limit=5&offset=0', token=token)
+    expect(status == 200, f'GET /manufacturing expected 200, got {status}: {manufacturing_page}')
+    expect(isinstance(manufacturing_page, dict), '/manufacturing response must be object')
+    manufacturing_items = pick(manufacturing_page, 'items', 'Items')
+    expect(isinstance(manufacturing_items, list), '/manufacturing.items must be array')
+
+    manufacturing_payload = {
+        'manufacturingCode': f'SMK{smoke_id[-8:]}',
+        'pieceName': 'Smoke Test Pendant',
+        'pieceType': 'pendant',
+        'status': 'approved',
+        'designerName': 'Smoke QA',
+        'sellingPrice': 1000,
+        'totalCost': 700,
+        'gemstones': []
+    }
+    status, manufacturing_created = http_json('POST', f'{base_url}/manufacturing', token=token, body=manufacturing_payload)
+    expect(status == 201, f'POST /manufacturing expected 201, got {status}: {manufacturing_created}')
+    expect(isinstance(manufacturing_created, dict), '/manufacturing POST response must be object')
+    manufacturing_id = pick(manufacturing_created, 'id', 'Id')
+    expect(isinstance(manufacturing_id, int), 'Created manufacturing id must be int')
+
+    status, manufacturing_detail = http_json('GET', f'{base_url}/manufacturing/{manufacturing_id}', token=token)
+    expect(status == 200, f'GET /manufacturing/{{id}} expected 200, got {status}: {manufacturing_detail}')
+    expect(isinstance(manufacturing_detail, dict), '/manufacturing/{id} response must be object')
+
+    status, manufacturing_updated = http_json(
+        'PUT',
+        f'{base_url}/manufacturing/{manufacturing_id}',
+        token=token,
+        body={'status': 'ready_for_sale', 'activityNote': 'Smoke promotion to ready_for_sale'}
+    )
+    expect(status == 200, f'PUT /manufacturing/{{id}} expected 200, got {status}: {manufacturing_updated}')
+
+    status, analytics = http_json('GET', f'{base_url}/analytics', token=token)
+    expect(status == 200, f'GET /analytics expected 200, got {status}: {analytics}')
+    expect(isinstance(analytics, dict), '/analytics response must be object')
+
     status, sql_health = http_json('GET', f'{base_url}/health/sql', token=token)
     expect(status in (200, 503), f'GET /health/sql expected 200 or 503, got {status}: {sql_health}')
 

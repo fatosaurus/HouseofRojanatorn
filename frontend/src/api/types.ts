@@ -82,3 +82,182 @@ export interface PagedResponse<T> {
   limit: number
   offset: number
 }
+
+export interface Customer {
+  id: string
+  name: string
+  nickname: string | null
+  email: string | null
+  phone: string | null
+  address: string | null
+  notes: string | null
+  photoUrl: string | null
+  customerSince: string | null
+  createdAtUtc: string
+  updatedAtUtc: string
+  totalSpent: number
+  purchaseCount: number
+}
+
+export interface CustomerActivity {
+  id: number
+  projectId: number
+  manufacturingCode: string
+  pieceName: string
+  status: string
+  activityAtUtc: string
+  craftsmanName: string | null
+  notes: string | null
+}
+
+export interface CustomerUpsertRequest {
+  name: string
+  nickname?: string | null
+  email?: string | null
+  phone?: string | null
+  address?: string | null
+  notes?: string | null
+  photoUrl?: string | null
+  customerSince?: string | null
+}
+
+export interface ManufacturingGemstone {
+  id: number
+  inventoryItemId: number | null
+  gemstoneCode: string | null
+  gemstoneType: string | null
+  piecesUsed: number
+  weightUsedCt: number
+  lineCost: number
+  notes: string | null
+}
+
+export interface ManufacturingActivityLog {
+  id: number
+  status: string
+  activityAtUtc: string
+  craftsmanName: string | null
+  notes: string | null
+}
+
+export interface ManufacturingProjectSummary {
+  id: number
+  manufacturingCode: string
+  pieceName: string
+  pieceType: string | null
+  designDate: string | null
+  designerName: string | null
+  status: string
+  craftsmanName: string | null
+  metalPlating: string[]
+  settingCost: number
+  diamondCost: number
+  gemstoneCost: number
+  totalCost: number
+  sellingPrice: number
+  completionDate: string | null
+  customerId: string | null
+  customerName: string | null
+  soldAt: string | null
+  createdAtUtc: string
+  updatedAtUtc: string
+  gemstoneCount: number
+}
+
+export interface ManufacturingProjectDetail {
+  id: number
+  manufacturingCode: string
+  pieceName: string
+  pieceType: string | null
+  designDate: string | null
+  designerName: string | null
+  status: string
+  craftsmanName: string | null
+  metalPlating: string[]
+  metalPlatingNotes: string | null
+  settingCost: number
+  diamondCost: number
+  gemstoneCost: number
+  totalCost: number
+  sellingPrice: number
+  completionDate: string | null
+  usageNotes: string | null
+  photos: string[]
+  customerId: string | null
+  customerName: string | null
+  soldAt: string | null
+  createdAtUtc: string
+  updatedAtUtc: string
+  gemstones: ManufacturingGemstone[]
+  activityLog: ManufacturingActivityLog[]
+}
+
+export interface ManufacturingGemstoneUpsertRequest {
+  inventoryItemId?: number | null
+  gemstoneCode?: string | null
+  gemstoneType?: string | null
+  piecesUsed?: number | null
+  weightUsedCt?: number | null
+  lineCost?: number | null
+  notes?: string | null
+}
+
+export interface ManufacturingProjectUpsertRequest {
+  manufacturingCode?: string | null
+  pieceName?: string | null
+  pieceType?: string | null
+  designDate?: string | null
+  designerName?: string | null
+  status?: string | null
+  craftsmanName?: string | null
+  metalPlating?: string[] | null
+  metalPlatingNotes?: string | null
+  settingCost?: number | null
+  diamondCost?: number | null
+  gemstoneCost?: number | null
+  totalCost?: number | null
+  sellingPrice?: number | null
+  completionDate?: string | null
+  usageNotes?: string | null
+  photos?: string[] | null
+  customerId?: string | null
+  soldAt?: string | null
+  gemstones?: ManufacturingGemstoneUpsertRequest[] | null
+  activityNote?: string | null
+}
+
+export interface AnalyticsCurrentMonth {
+  revenue: number
+  transactions: number
+  startDateUtc: string
+}
+
+export interface AnalyticsTotals {
+  revenue: number
+  orders: number
+  avgOrderValue: number
+  customers: number
+  customersWithPurchases: number
+}
+
+export interface AnalyticsMonthlyRevenuePoint {
+  month: string
+  revenue: number
+  customers: number
+  orders: number
+}
+
+export interface AnalyticsTopCustomerPoint {
+  customerId: string
+  customerName: string
+  totalSpent: number
+  purchases: number
+  lastPurchaseUtc: string
+}
+
+export interface AnalyticsOverview {
+  currentMonth: AnalyticsCurrentMonth
+  totals: AnalyticsTotals
+  monthlyRevenue: AnalyticsMonthlyRevenuePoint[]
+  topCustomers: AnalyticsTopCustomerPoint[]
+}

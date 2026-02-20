@@ -2,8 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { getInventoryItem, getInventoryItems, getInventorySummary, getUsageBatch, getUsageBatches } from '../api/client'
 import type { InventoryItem, InventorySummary, UsageBatch, UsageBatchDetail } from '../api/types'
 import { useSession } from '../app/useSession'
+import { AnalyticsPanel } from '../components/dashboard/AnalyticsPanel'
+import { CustomersPanel } from '../components/dashboard/CustomersPanel'
+import { ManufacturingPanel } from '../components/dashboard/ManufacturingPanel'
+import { PurchasesPanel } from '../components/dashboard/PurchasesPanel'
 
-type DashboardTab = 'inventory' | 'usage'
+type DashboardTab = 'customers' | 'purchases' | 'inventory' | 'manufacturing' | 'usage' | 'analytics'
 
 function formatCurrency(value: number | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -44,7 +48,7 @@ function categoryLabel(value: string): string {
 
 export function DashboardPage() {
   const { email, role, signOut } = useSession()
-  const [activeTab, setActiveTab] = useState<DashboardTab>('inventory')
+  const [activeTab, setActiveTab] = useState<DashboardTab>('customers')
 
   const [summary, setSummary] = useState<InventorySummary | null>(null)
   const [inventory, setInventory] = useState<InventoryItem[]>([])
@@ -154,6 +158,15 @@ export function DashboardPage() {
     }
   }, [usageCategory, usageSearch])
 
+  useEffect(() => {
+    if (activeTab !== 'inventory') {
+      setSelectedInventory(null)
+    }
+    if (activeTab !== 'usage') {
+      setSelectedUsageBatch(null)
+    }
+  }, [activeTab])
+
   async function openInventoryDetail(itemId: number) {
     try {
       const detail = await getInventoryItem(itemId)
@@ -182,6 +195,19 @@ export function DashboardPage() {
     return [...values].sort((a, b) => a.localeCompare(b))
   }, [inventory])
 
+  const headerDescription =
+    activeTab === 'customers'
+      ? 'Customer profiles and relationship notes linked to purchases.'
+      : activeTab === 'manufacturing'
+        ? 'Production workflow records aligned with the reference prototype.'
+        : activeTab === 'purchases'
+          ? 'Sold records derived from manufacturing projects with status = sold.'
+          : activeTab === 'analytics'
+            ? 'Business metrics generated from sold projects and customer activity.'
+            : activeTab === 'usage'
+              ? 'Usage history mapped from workbook batches and lines.'
+              : 'Mapped from real 2026 stock workbook and Azure SQL data.'
+
   return (
     <main className="dashboard-shell">
       <aside className="dashboard-sidebar">
@@ -194,11 +220,23 @@ export function DashboardPage() {
         </div>
 
         <nav className="sidebar-nav">
+          <button type="button" className={activeTab === 'customers' ? 'active' : ''} onClick={() => setActiveTab('customers')}>
+            Customers
+          </button>
+          <button type="button" className={activeTab === 'purchases' ? 'active' : ''} onClick={() => setActiveTab('purchases')}>
+            Purchases
+          </button>
           <button type="button" className={activeTab === 'inventory' ? 'active' : ''} onClick={() => setActiveTab('inventory')}>
             Gemstones
           </button>
+          <button type="button" className={activeTab === 'manufacturing' ? 'active' : ''} onClick={() => setActiveTab('manufacturing')}>
+            Manufacturing
+          </button>
           <button type="button" className={activeTab === 'usage' ? 'active' : ''} onClick={() => setActiveTab('usage')}>
-            Usage History
+            History
+          </button>
+          <button type="button" className={activeTab === 'analytics' ? 'active' : ''} onClick={() => setActiveTab('analytics')}>
+            Analytics
           </button>
         </nav>
 
@@ -212,7 +250,7 @@ export function DashboardPage() {
         <header className="dashboard-header">
           <div>
             <h2>Operations Dashboard</h2>
-            <p>Mapped from real 2026 stock workbook and Azure SQL data.</p>
+            <p>{headerDescription}</p>
           </div>
           <button type="button" className="secondary-btn" onClick={signOut}>
             Sign Out
@@ -221,26 +259,36 @@ export function DashboardPage() {
 
         {errorMessage ? <p className="error-banner">{errorMessage}</p> : null}
 
-        <section className="stats-grid">
-          <article>
-            <h3>Total Gem Entries</h3>
-            <strong>{isLoadingSummary ? '...' : (summary?.totalItems ?? 0).toLocaleString()}</strong>
-          </article>
-          <article>
-            <h3>Low Stock</h3>
-            <strong>{isLoadingSummary ? '...' : (summary?.lowStockItems ?? 0).toLocaleString()}</strong>
-          </article>
-          <article>
-            <h3>Total Carats</h3>
-            <strong>{isLoadingSummary ? '...' : (summary?.totalBalanceCarats ?? 0).toFixed(2)}</strong>
-          </article>
-          <article>
-            <h3>Est. Value</h3>
-            <strong>{isLoadingSummary ? '...' : formatCurrency(summary?.estimatedInventoryValue ?? 0)}</strong>
-          </article>
-        </section>
+        {(activeTab === 'inventory' || activeTab === 'usage') ? (
+          <section className="stats-grid">
+            <article>
+              <h3>Total Gem Entries</h3>
+              <strong>{isLoadingSummary ? '...' : (summary?.totalItems ?? 0).toLocaleString()}</strong>
+            </article>
+            <article>
+              <h3>Low Stock</h3>
+              <strong>{isLoadingSummary ? '...' : (summary?.lowStockItems ?? 0).toLocaleString()}</strong>
+            </article>
+            <article>
+              <h3>Total Carats</h3>
+              <strong>{isLoadingSummary ? '...' : (summary?.totalBalanceCarats ?? 0).toFixed(2)}</strong>
+            </article>
+            <article>
+              <h3>Est. Value</h3>
+              <strong>{isLoadingSummary ? '...' : formatCurrency(summary?.estimatedInventoryValue ?? 0)}</strong>
+            </article>
+          </section>
+        ) : null}
 
-        {activeTab === 'inventory' ? (
+        {activeTab === 'customers' ? (
+          <CustomersPanel />
+        ) : activeTab === 'manufacturing' ? (
+          <ManufacturingPanel />
+        ) : activeTab === 'purchases' ? (
+          <PurchasesPanel />
+        ) : activeTab === 'analytics' ? (
+          <AnalyticsPanel />
+        ) : activeTab === 'inventory' ? (
           <section className="content-card">
             <div className="card-head">
               <div>

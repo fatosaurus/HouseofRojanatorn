@@ -52,11 +52,13 @@ if (!IsMissingOrPlaceholder(sqlConnection))
 {
     builder.Services.AddSingleton<ISqlDataService, SqlDataService>();
     builder.Services.AddSingleton<IGemInventorySqlService, GemInventorySqlService>();
+    builder.Services.AddSingleton<ICustomerManufacturingSqlService, CustomerManufacturingSqlService>();
 }
 else
 {
     builder.Services.AddSingleton<ISqlDataService, NoopSqlDataService>();
     builder.Services.AddSingleton<IGemInventorySqlService, NoopGemInventorySqlService>();
+    builder.Services.AddSingleton<ICustomerManufacturingSqlService, NoopCustomerManufacturingSqlService>();
 }
 
 builder.UseMiddleware<CorsMiddleware>();
