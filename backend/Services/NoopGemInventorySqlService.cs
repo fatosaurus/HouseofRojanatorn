@@ -16,8 +16,8 @@ public sealed class NoopGemInventorySqlService : IGemInventorySqlService
         CancellationToken cancellationToken = default)
         => Task.FromResult(new PagedResponse<InventoryItemResponse>([], 0, Math.Clamp(limit, 1, 200), Math.Max(offset, 0)));
 
-    public Task<InventoryItemResponse?> GetInventoryItemByIdAsync(int id, CancellationToken cancellationToken = default)
-        => Task.FromResult<InventoryItemResponse?>(null);
+    public Task<InventoryItemDetailResponse?> GetInventoryItemByIdAsync(int id, CancellationToken cancellationToken = default)
+        => Task.FromResult<InventoryItemDetailResponse?>(null);
 
     public Task<PagedResponse<UsageBatchResponse>> GetUsageBatchesAsync(
         string? search,

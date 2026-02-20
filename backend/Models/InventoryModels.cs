@@ -15,7 +15,7 @@ public sealed class InventorySummaryResponse
     public decimal EstimatedInventoryValue { get; init; }
 }
 
-public sealed class InventoryItemResponse
+public class InventoryItemResponse
 {
     public int Id { get; init; }
     public int? GemstoneNumber { get; init; }
@@ -35,6 +35,42 @@ public sealed class InventoryItemResponse
     public decimal? ParsedPricePerPiece { get; init; }
     public decimal EffectiveBalancePcs { get; init; }
     public decimal EffectiveBalanceCt { get; init; }
+}
+
+public sealed class InventoryUsageActivityResponse
+{
+    public int LineId { get; init; }
+    public int BatchId { get; init; }
+    public DateTime? TransactionDate { get; init; }
+    public string? ProductCode { get; init; }
+    public string ProductCategory { get; init; } = string.Empty;
+    public string? RequesterName { get; init; }
+    public decimal? UsedPcs { get; init; }
+    public decimal? UsedWeightCt { get; init; }
+    public decimal? LineAmount { get; init; }
+    public decimal? BalancePcsAfter { get; init; }
+    public decimal? BalanceCtAfter { get; init; }
+}
+
+public sealed class InventoryManufacturingActivityResponse
+{
+    public int ProjectId { get; init; }
+    public string ManufacturingCode { get; init; } = string.Empty;
+    public string PieceName { get; init; } = string.Empty;
+    public string? PieceType { get; init; }
+    public string Status { get; init; } = string.Empty;
+    public DateTime? ActivityAtUtc { get; init; }
+    public string? CraftsmanName { get; init; }
+    public string? Notes { get; init; }
+    public decimal PiecesUsed { get; init; }
+    public decimal WeightUsedCt { get; init; }
+    public decimal LineCost { get; init; }
+}
+
+public sealed class InventoryItemDetailResponse : InventoryItemResponse
+{
+    public IReadOnlyList<InventoryUsageActivityResponse> UsageActivities { get; init; } = [];
+    public IReadOnlyList<InventoryManufacturingActivityResponse> ManufacturingActivities { get; init; } = [];
 }
 
 public sealed class UsageBatchResponse

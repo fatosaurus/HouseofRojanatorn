@@ -8,7 +8,10 @@ import type {
   CustomerActivity,
   CustomerUpsertRequest,
   InventoryItem,
+  InventoryItemDetail,
+  InventoryManufacturingActivity,
   InventorySummary,
+  InventoryUsageActivity,
   MeProfile,
   ManufacturingActivityLog,
   ManufacturingGemstone,
@@ -110,6 +113,53 @@ function mapInventoryItem(record: UnknownRecord): InventoryItem {
     parsedPricePerPiece: readNumber(record, 'parsedPricePerPiece', 'ParsedPricePerPiece'),
     effectiveBalancePcs: readNumber(record, 'effectiveBalancePcs', 'EffectiveBalancePcs') ?? 0,
     effectiveBalanceCt: readNumber(record, 'effectiveBalanceCt', 'EffectiveBalanceCt') ?? 0
+  }
+}
+
+function mapInventoryUsageActivity(record: UnknownRecord): InventoryUsageActivity {
+  return {
+    lineId: readNumber(record, 'lineId', 'LineId') ?? 0,
+    batchId: readNumber(record, 'batchId', 'BatchId') ?? 0,
+    transactionDate: readString(record, 'transactionDate', 'TransactionDate'),
+    productCode: readString(record, 'productCode', 'ProductCode'),
+    productCategory: readString(record, 'productCategory', 'ProductCategory') ?? '',
+    requesterName: readString(record, 'requesterName', 'RequesterName'),
+    usedPcs: readNumber(record, 'usedPcs', 'UsedPcs'),
+    usedWeightCt: readNumber(record, 'usedWeightCt', 'UsedWeightCt'),
+    lineAmount: readNumber(record, 'lineAmount', 'LineAmount'),
+    balancePcsAfter: readNumber(record, 'balancePcsAfter', 'BalancePcsAfter'),
+    balanceCtAfter: readNumber(record, 'balanceCtAfter', 'BalanceCtAfter')
+  }
+}
+
+function mapInventoryManufacturingActivity(record: UnknownRecord): InventoryManufacturingActivity {
+  return {
+    projectId: readNumber(record, 'projectId', 'ProjectId') ?? 0,
+    manufacturingCode: readString(record, 'manufacturingCode', 'ManufacturingCode') ?? '',
+    pieceName: readString(record, 'pieceName', 'PieceName') ?? '',
+    pieceType: readString(record, 'pieceType', 'PieceType'),
+    status: readString(record, 'status', 'Status') ?? '',
+    activityAtUtc: readString(record, 'activityAtUtc', 'ActivityAtUtc'),
+    craftsmanName: readString(record, 'craftsmanName', 'CraftsmanName'),
+    notes: readString(record, 'notes', 'Notes'),
+    piecesUsed: readNumber(record, 'piecesUsed', 'PiecesUsed') ?? 0,
+    weightUsedCt: readNumber(record, 'weightUsedCt', 'WeightUsedCt') ?? 0,
+    lineCost: readNumber(record, 'lineCost', 'LineCost') ?? 0
+  }
+}
+
+function mapInventoryItemDetail(record: UnknownRecord): InventoryItemDetail {
+  const rawUsage = pick<unknown[]>(record, 'usageActivities', 'UsageActivities') ?? []
+  const rawManufacturing = pick<unknown[]>(record, 'manufacturingActivities', 'ManufacturingActivities') ?? []
+
+  return {
+    ...mapInventoryItem(record),
+    usageActivities: rawUsage
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(mapInventoryUsageActivity),
+    manufacturingActivities: rawManufacturing
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(mapInventoryManufacturingActivity)
   }
 }
 
@@ -389,9 +439,9 @@ export async function getInventoryItems(query: InventoryQuery): Promise<PagedRes
   return mapPagedResponse(response, mapInventoryItem)
 }
 
-export async function getInventoryItem(id: number): Promise<InventoryItem> {
+export async function getInventoryItem(id: number): Promise<InventoryItemDetail> {
   const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/inventory/gemstones/${id}`)
-  return mapInventoryItem(response)
+  return mapInventoryItemDetail(response)
 }
 
 interface UsageQuery {

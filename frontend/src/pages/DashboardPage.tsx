@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getInventoryItem, getInventoryItems, getInventorySummary, getUsageBatches } from '../api/client'
-import type { InventoryItem, InventorySummary } from '../api/types'
+import type { InventoryItem, InventoryItemDetail, InventorySummary } from '../api/types'
 import { useSession } from '../app/useSession'
 import { AnalyticsPanel } from '../components/dashboard/AnalyticsPanel'
 import { CustomersPanel } from '../components/dashboard/CustomersPanel'
@@ -39,9 +39,18 @@ function formatDate(raw: string | null | undefined): string {
   })
 }
 
+function formatNumber(value: number | null | undefined, digits = 2): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return '-'
+  }
+
+  return value.toFixed(digits)
+}
+
 export function DashboardPage() {
   const { email, role, signOut } = useSession()
   const [activeTab, setActiveTab] = useState<DashboardTab>('customers')
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
 
   const [summary, setSummary] = useState<InventorySummary | null>(null)
   const [inventory, setInventory] = useState<InventoryItem[]>([])
@@ -52,7 +61,7 @@ export function DashboardPage() {
   const [inventorySearch, setInventorySearch] = useState('')
   const [inventoryType, setInventoryType] = useState('all')
   const [inventoryStatus, setInventoryStatus] = useState('all')
-  const [selectedInventory, setSelectedInventory] = useState<InventoryItem | null>(null)
+  const [selectedInventory, setSelectedInventory] = useState<InventoryItemDetail | null>(null)
 
   const [isLoadingSummary, setIsLoadingSummary] = useState(true)
   const [isLoadingInventory, setIsLoadingInventory] = useState(true)
@@ -216,34 +225,52 @@ export function DashboardPage() {
               : 'Mapped from real 2026 stock workbook and Azure SQL data.'
 
   return (
-    <main className="dashboard-shell">
+    <main className={`dashboard-shell ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <aside className="dashboard-sidebar">
-        <div className="brand-mark">
-          <span className="brand-dot" />
-          <div>
-            <h1>House of Rojanatorn</h1>
-            <p>Gem Inventory Suite</p>
+        <div className="sidebar-top-row">
+          <div className="brand-mark">
+            <span className="brand-dot" />
+            <div>
+              <h1>House of Rojanatorn</h1>
+              <p>Gem Inventory Suite</p>
+            </div>
           </div>
+
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={() => setIsSidebarCollapsed(current => !current)}
+            aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {isSidebarCollapsed ? '›' : '‹'}
+          </button>
         </div>
 
         <nav className="sidebar-nav">
           <button type="button" className={activeTab === 'customers' ? 'active' : ''} onClick={() => setActiveTab('customers')}>
-            Customers
+            <span className="label-full">Customers</span>
+            <span className="label-short">CU</span>
           </button>
           <button type="button" className={activeTab === 'purchases' ? 'active' : ''} onClick={() => setActiveTab('purchases')}>
-            Purchases
+            <span className="label-full">Purchases</span>
+            <span className="label-short">PU</span>
           </button>
           <button type="button" className={activeTab === 'inventory' ? 'active' : ''} onClick={() => setActiveTab('inventory')}>
-            Gemstones
+            <span className="label-full">Gemstones</span>
+            <span className="label-short">GE</span>
           </button>
           <button type="button" className={activeTab === 'manufacturing' ? 'active' : ''} onClick={() => setActiveTab('manufacturing')}>
-            Manufacturing
+            <span className="label-full">Manufacturing</span>
+            <span className="label-short">MF</span>
           </button>
           <button type="button" className={activeTab === 'usage' ? 'active' : ''} onClick={() => setActiveTab('usage')}>
-            History
+            <span className="label-full">History</span>
+            <span className="label-short">HI</span>
           </button>
           <button type="button" className={activeTab === 'analytics' ? 'active' : ''} onClick={() => setActiveTab('analytics')}>
-            Analytics
+            <span className="label-full">Analytics</span>
+            <span className="label-short">AN</span>
           </button>
         </nav>
 
@@ -251,18 +278,15 @@ export function DashboardPage() {
           <p>{email}</p>
           <span>{role.toUpperCase()}</span>
         </section>
+
+        <button type="button" className="sidebar-signout" onClick={signOut}>
+          <span className="label-full">Sign Out</span>
+          <span className="label-short">SO</span>
+        </button>
       </aside>
 
       <section className="dashboard-main">
-        <header className="dashboard-header">
-          <div>
-            <h2>Operations Dashboard</h2>
-            <p>{headerDescription}</p>
-          </div>
-          <button type="button" className="secondary-btn" onClick={signOut}>
-            Sign Out
-          </button>
-        </header>
+        <p className="page-subtitle">{headerDescription}</p>
 
         {errorMessage ? <p className="error-banner">{errorMessage}</p> : null}
 
@@ -422,24 +446,140 @@ export function DashboardPage() {
         )}
 
         {selectedInventory ? (
-          <section className="detail-drawer">
-            <div className="drawer-head">
-              <h3>Gemstone Detail</h3>
-              <button type="button" className="secondary-btn" onClick={() => setSelectedInventory(null)}>
-                Close
-              </button>
-            </div>
-            <div className="drawer-grid">
-              <p><strong>Code:</strong> {selectedInventory.gemstoneNumber ?? selectedInventory.gemstoneNumberText ?? '-'}</p>
-              <p><strong>Type:</strong> {selectedInventory.gemstoneType ?? '-'}</p>
-              <p><strong>Shape:</strong> {selectedInventory.shape ?? '-'}</p>
-              <p><strong>Weight/PCS Raw:</strong> {selectedInventory.weightPcsRaw ?? '-'}</p>
-              <p><strong>Price/CT Raw:</strong> {selectedInventory.pricePerCtRaw ?? '-'}</p>
-              <p><strong>Price/PC Raw:</strong> {selectedInventory.pricePerPieceRaw ?? '-'}</p>
-              <p><strong>Buying Date:</strong> {formatDate(selectedInventory.buyingDate)}</p>
-              <p><strong>Owner:</strong> {selectedInventory.ownerName ?? '-'}</p>
-            </div>
-          </section>
+          <div className="detail-modal-backdrop" onClick={() => setSelectedInventory(null)}>
+            <section className="detail-modal-panel" onClick={event => event.stopPropagation()}>
+              <div className="drawer-head">
+                <h3>
+                  Gemstone
+                  {' '}
+                  {selectedInventory.gemstoneNumber ?? selectedInventory.gemstoneNumberText ?? selectedInventory.id}
+                </h3>
+                <button type="button" className="secondary-btn" onClick={() => setSelectedInventory(null)}>
+                  Close
+                </button>
+              </div>
+
+              <div className="usage-lines">
+                <h4>Details</h4>
+                <div className="drawer-grid">
+                  <p><strong>Inventory ID:</strong> {selectedInventory.id}</p>
+                  <p><strong>Code:</strong> {selectedInventory.gemstoneNumber ?? selectedInventory.gemstoneNumberText ?? '-'}</p>
+                  <p><strong>Type:</strong> {selectedInventory.gemstoneType ?? '-'}</p>
+                  <p><strong>Shape:</strong> {selectedInventory.shape ?? '-'}</p>
+                  <p><strong>Buying Date:</strong> {formatDate(selectedInventory.buyingDate)}</p>
+                  <p><strong>Owner:</strong> {selectedInventory.ownerName ?? '-'}</p>
+                  <p><strong>Raw Weight/PCS:</strong> {selectedInventory.weightPcsRaw ?? '-'}</p>
+                  <p><strong>Raw Price/CT:</strong> {selectedInventory.pricePerCtRaw ?? '-'}</p>
+                  <p><strong>Raw Price/PC:</strong> {selectedInventory.pricePerPieceRaw ?? '-'}</p>
+                  <p><strong>Balance CT:</strong> {formatNumber(selectedInventory.effectiveBalanceCt, 2)}</p>
+                  <p><strong>Balance PCS:</strong> {formatNumber(selectedInventory.effectiveBalancePcs, 0)}</p>
+                  <p><strong>Parsed Weight CT:</strong> {formatNumber(selectedInventory.parsedWeightCt, 2)}</p>
+                  <p><strong>Parsed Qty PCS:</strong> {formatNumber(selectedInventory.parsedQuantityPcs, 0)}</p>
+                  <p><strong>Parsed Price/CT:</strong> {formatNumber(selectedInventory.parsedPricePerCt, 2)}</p>
+                  <p><strong>Parsed Price/PC:</strong> {formatNumber(selectedInventory.parsedPricePerPiece, 2)}</p>
+                </div>
+              </div>
+
+              <div className="usage-lines">
+                <h4>
+                  Manufacturing Activities
+                  {' '}
+                  ({selectedInventory.manufacturingActivities.length})
+                </h4>
+                {selectedInventory.manufacturingActivities.length === 0 ? (
+                  <p className="panel-placeholder">No manufacturing activity found for this gemstone.</p>
+                ) : (
+                  <div className="activity-list">
+                    {selectedInventory.manufacturingActivities.map((activity, index) => (
+                      <article key={`${activity.projectId}-${activity.activityAtUtc ?? 'activity'}-${index}`}>
+                        <p>
+                          <strong>{activity.manufacturingCode}</strong>
+                          {' • '}
+                          {activity.pieceName}
+                        </p>
+                        <p>
+                          {activity.status}
+                          {' • '}
+                          {formatDate(activity.activityAtUtc)}
+                        </p>
+                        <p>
+                          Used
+                          {' '}
+                          {formatNumber(activity.piecesUsed, 0)}
+                          {' '}
+                          pcs /
+                          {' '}
+                          {formatNumber(activity.weightUsedCt, 2)}
+                          {' '}
+                          ct
+                          {' • '}
+                          Line Cost
+                          {' '}
+                          {formatCurrency(activity.lineCost)}
+                        </p>
+                        {activity.craftsmanName ? <p>Craftsman: {activity.craftsmanName}</p> : null}
+                        {activity.notes ? <p>{activity.notes}</p> : null}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="usage-lines">
+                <h4>
+                  Usage Activities
+                  {' '}
+                  ({selectedInventory.usageActivities.length})
+                </h4>
+                {selectedInventory.usageActivities.length === 0 ? (
+                  <p className="panel-placeholder">No usage history found for this gemstone.</p>
+                ) : (
+                  <div className="activity-list">
+                    {selectedInventory.usageActivities.map(activity => (
+                      <article key={activity.lineId}>
+                        <p>
+                          <strong>{activity.productCode ?? '-'}</strong>
+                          {' • '}
+                          {activity.productCategory || 'uncategorized'}
+                        </p>
+                        <p>
+                          {formatDate(activity.transactionDate)}
+                          {' • '}
+                          {activity.requesterName ?? '-'}
+                        </p>
+                        <p>
+                          Used
+                          {' '}
+                          {formatNumber(activity.usedPcs, 0)}
+                          {' '}
+                          pcs /
+                          {' '}
+                          {formatNumber(activity.usedWeightCt, 2)}
+                          {' '}
+                          ct
+                        </p>
+                        <p>
+                          Line Amount
+                          {' '}
+                          {formatCurrency(activity.lineAmount)}
+                          {' • '}
+                          Balance After
+                          {' '}
+                          {formatNumber(activity.balancePcsAfter, 0)}
+                          {' '}
+                          pcs /
+                          {' '}
+                          {formatNumber(activity.balanceCtAfter, 2)}
+                          {' '}
+                          ct
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
         ) : null}
 
       </section>

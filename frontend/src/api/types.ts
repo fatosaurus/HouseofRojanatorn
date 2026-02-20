@@ -41,6 +41,39 @@ export interface InventoryItem {
   effectiveBalanceCt: number
 }
 
+export interface InventoryUsageActivity {
+  lineId: number
+  batchId: number
+  transactionDate: string | null
+  productCode: string | null
+  productCategory: string
+  requesterName: string | null
+  usedPcs: number | null
+  usedWeightCt: number | null
+  lineAmount: number | null
+  balancePcsAfter: number | null
+  balanceCtAfter: number | null
+}
+
+export interface InventoryManufacturingActivity {
+  projectId: number
+  manufacturingCode: string
+  pieceName: string
+  pieceType: string | null
+  status: string
+  activityAtUtc: string | null
+  craftsmanName: string | null
+  notes: string | null
+  piecesUsed: number
+  weightUsedCt: number
+  lineCost: number
+}
+
+export interface InventoryItemDetail extends InventoryItem {
+  usageActivities: InventoryUsageActivity[]
+  manufacturingActivities: InventoryManufacturingActivity[]
+}
+
 export interface UsageBatch {
   id: number
   productCategory: string
