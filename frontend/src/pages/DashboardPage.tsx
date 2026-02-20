@@ -8,6 +8,7 @@ import { ManufacturingPanel } from '../components/dashboard/ManufacturingPanel'
 import { PurchasesPanel } from '../components/dashboard/PurchasesPanel'
 
 type DashboardTab = 'customers' | 'purchases' | 'inventory' | 'manufacturing' | 'usage' | 'analytics'
+const INVENTORY_PAGE_SIZE = 50
 
 function formatCurrency(value: number | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -53,6 +54,7 @@ export function DashboardPage() {
   const [summary, setSummary] = useState<InventorySummary | null>(null)
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [inventoryTotal, setInventoryTotal] = useState(0)
+  const [inventoryOffset, setInventoryOffset] = useState(0)
   const [usageBatches, setUsageBatches] = useState<UsageBatch[]>([])
   const [usageTotal, setUsageTotal] = useState(0)
 
@@ -67,6 +69,7 @@ export function DashboardPage() {
 
   const [isLoadingSummary, setIsLoadingSummary] = useState(true)
   const [isLoadingInventory, setIsLoadingInventory] = useState(true)
+  const [isLoadingMoreInventory, setIsLoadingMoreInventory] = useState(false)
   const [isLoadingUsage, setIsLoadingUsage] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -98,17 +101,22 @@ export function DashboardPage() {
   useEffect(() => {
     let cancelled = false
     setIsLoadingInventory(true)
+    setErrorMessage(null)
+    setInventory([])
+    setInventoryTotal(0)
+    setInventoryOffset(0)
     void getInventoryItems({
       search: inventorySearch,
       type: inventoryType,
       status: inventoryStatus,
-      limit: 120,
+      limit: INVENTORY_PAGE_SIZE,
       offset: 0
     })
       .then(result => {
         if (!cancelled) {
           setInventory(result.items)
           setInventoryTotal(result.totalCount)
+          setInventoryOffset(result.items.length)
         }
       })
       .catch(() => {
@@ -182,6 +190,33 @@ export function DashboardPage() {
       setSelectedUsageBatch(detail)
     } catch {
       setErrorMessage('Unable to load selected usage batch.')
+    }
+  }
+
+  async function loadMoreInventory() {
+    if (isLoadingInventory || isLoadingMoreInventory || inventory.length >= inventoryTotal) {
+      return
+    }
+
+    setIsLoadingMoreInventory(true)
+    setErrorMessage(null)
+
+    try {
+      const result = await getInventoryItems({
+        search: inventorySearch,
+        type: inventoryType,
+        status: inventoryStatus,
+        limit: INVENTORY_PAGE_SIZE,
+        offset: inventoryOffset
+      })
+
+      setInventory(current => [...current, ...result.items])
+      setInventoryTotal(result.totalCount)
+      setInventoryOffset(current => current + result.items.length)
+    } catch {
+      setErrorMessage('Unable to load more inventory records.')
+    } finally {
+      setIsLoadingMoreInventory(false)
     }
   }
 
@@ -320,53 +355,73 @@ export function DashboardPage() {
 
             {isLoadingInventory ? (
               <p className="panel-placeholder">Loading inventory data...</p>
+            ) : inventory.length === 0 ? (
+              <p className="panel-placeholder">No gemstones match the current filters.</p>
             ) : (
-              <div className="inventory-grid">
-                {inventory.map(item => {
-                  const statusClass =
-                    item.effectiveBalanceCt > 1 || item.effectiveBalancePcs > 10
-                      ? 'ok'
-                      : item.effectiveBalanceCt > 0 || item.effectiveBalancePcs > 0
-                        ? 'low'
-                        : 'out'
+              <>
+                <div className="usage-table-wrap">
+                  <table className="usage-table">
+                    <thead>
+                      <tr>
+                        <th>Gem #</th>
+                        <th>Type</th>
+                        <th>Shape</th>
+                        <th>Owner</th>
+                        <th>Buying Date</th>
+                        <th>Balance (CT)</th>
+                        <th>Balance (PCS)</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inventory.map(item => {
+                        const statusClass =
+                          item.effectiveBalanceCt > 1 || item.effectiveBalancePcs > 10
+                            ? 'ok'
+                            : item.effectiveBalanceCt > 0 || item.effectiveBalancePcs > 0
+                              ? 'low'
+                              : 'out'
 
-                  return (
-                    <button key={item.id} type="button" className="inventory-card" onClick={() => void openInventoryDetail(item.id)}>
-                      <div className="inventory-title-row">
-                        <h4>
-                          #{item.gemstoneNumber ?? item.gemstoneNumberText ?? item.id}
-                          {' '}
-                          {item.gemstoneType ?? 'Unknown gemstone'}
-                        </h4>
-                        <span className={`stock-pill ${statusClass}`}>
-                          {statusClass === 'ok' ? 'Available' : statusClass === 'low' ? 'Low' : 'Out'}
-                        </span>
-                      </div>
-                      <p>{item.shape ?? 'Shape N/A'}</p>
-                      <dl>
-                        <div>
-                          <dt>Balance</dt>
-                          <dd>
-                            {(item.effectiveBalanceCt ?? 0).toFixed(2)}
-                            ct /
-                            {' '}
-                            {(item.effectiveBalancePcs ?? 0).toFixed(0)}
-                            pcs
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Owner</dt>
-                          <dd>{item.ownerName ?? '-'}</dd>
-                        </div>
-                        <div>
-                          <dt>Buying Date</dt>
-                          <dd>{formatDate(item.buyingDate)}</dd>
-                        </div>
-                      </dl>
+                        return (
+                          <tr key={item.id} onClick={() => void openInventoryDetail(item.id)}>
+                            <td>{item.gemstoneNumber ?? item.gemstoneNumberText ?? item.id}</td>
+                            <td>{item.gemstoneType ?? '-'}</td>
+                            <td>{item.shape ?? '-'}</td>
+                            <td>{item.ownerName ?? '-'}</td>
+                            <td>{formatDate(item.buyingDate)}</td>
+                            <td>{(item.effectiveBalanceCt ?? 0).toFixed(2)}</td>
+                            <td>{(item.effectiveBalancePcs ?? 0).toFixed(0)}</td>
+                            <td>
+                              <span className={`stock-pill ${statusClass}`}>
+                                {statusClass === 'ok' ? 'Available' : statusClass === 'low' ? 'Low' : 'Out'}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="table-footer">
+                  <p>
+                    Showing
+                    {' '}
+                    {inventory.length.toLocaleString()}
+                    {' '}
+                    of
+                    {' '}
+                    {inventoryTotal.toLocaleString()}
+                    {' '}
+                    records
+                  </p>
+                  {inventory.length < inventoryTotal ? (
+                    <button type="button" className="secondary-btn" onClick={() => void loadMoreInventory()} disabled={isLoadingMoreInventory}>
+                      {isLoadingMoreInventory ? 'Loading...' : 'See more'}
                     </button>
-                  )
-                })}
-              </div>
+                  ) : null}
+                </div>
+              </>
             )}
           </section>
         ) : (
