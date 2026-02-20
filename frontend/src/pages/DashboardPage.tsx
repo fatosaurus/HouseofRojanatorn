@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getInventoryItem, getInventoryItems, getInventorySummary, getUsageBatch, getUsageBatches } from '../api/client'
-import type { InventoryItem, InventorySummary, UsageBatch, UsageBatchDetail } from '../api/types'
+import { getInventoryItem, getInventoryItems, getInventorySummary, getUsageBatches } from '../api/client'
+import type { InventoryItem, InventorySummary } from '../api/types'
 import { useSession } from '../app/useSession'
 import { AnalyticsPanel } from '../components/dashboard/AnalyticsPanel'
 import { CustomersPanel } from '../components/dashboard/CustomersPanel'
@@ -39,14 +39,6 @@ function formatDate(raw: string | null | undefined): string {
   })
 }
 
-function categoryLabel(value: string): string {
-  return value
-    .split('_')
-    .filter(Boolean)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
-}
-
 export function DashboardPage() {
   const { email, role, signOut } = useSession()
   const [activeTab, setActiveTab] = useState<DashboardTab>('customers')
@@ -55,17 +47,12 @@ export function DashboardPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [inventoryTotal, setInventoryTotal] = useState(0)
   const [inventoryOffset, setInventoryOffset] = useState(0)
-  const [usageBatches, setUsageBatches] = useState<UsageBatch[]>([])
   const [usageTotal, setUsageTotal] = useState(0)
 
   const [inventorySearch, setInventorySearch] = useState('')
   const [inventoryType, setInventoryType] = useState('all')
   const [inventoryStatus, setInventoryStatus] = useState('all')
-  const [usageSearch, setUsageSearch] = useState('')
-  const [usageCategory, setUsageCategory] = useState('all')
-
   const [selectedInventory, setSelectedInventory] = useState<InventoryItem | null>(null)
-  const [selectedUsageBatch, setSelectedUsageBatch] = useState<UsageBatchDetail | null>(null)
 
   const [isLoadingSummary, setIsLoadingSummary] = useState(true)
   const [isLoadingInventory, setIsLoadingInventory] = useState(true)
@@ -139,14 +126,11 @@ export function DashboardPage() {
     let cancelled = false
     setIsLoadingUsage(true)
     void getUsageBatches({
-      search: usageSearch,
-      category: usageCategory,
-      limit: 120,
+      limit: 1,
       offset: 0
     })
       .then(result => {
         if (!cancelled) {
-          setUsageBatches(result.items)
           setUsageTotal(result.totalCount)
         }
       })
@@ -164,14 +148,11 @@ export function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [usageCategory, usageSearch])
+  }, [])
 
   useEffect(() => {
     if (activeTab !== 'inventory') {
       setSelectedInventory(null)
-    }
-    if (activeTab !== 'usage') {
-      setSelectedUsageBatch(null)
     }
   }, [activeTab])
 
@@ -181,15 +162,6 @@ export function DashboardPage() {
       setSelectedInventory(detail)
     } catch {
       setErrorMessage('Unable to load selected inventory item.')
-    }
-  }
-
-  async function openUsageDetail(batchId: number) {
-    try {
-      const detail = await getUsageBatch(batchId)
-      setSelectedUsageBatch(detail)
-    } catch {
-      setErrorMessage('Unable to load selected usage batch.')
     }
   }
 
@@ -240,7 +212,7 @@ export function DashboardPage() {
           : activeTab === 'analytics'
             ? 'Business metrics generated from sold projects and customer activity.'
             : activeTab === 'usage'
-              ? 'Usage history mapped from workbook batches and lines.'
+              ? 'Historical import has been migrated into manufacturing records.'
               : 'Mapped from real 2026 stock workbook and Azure SQL data.'
 
   return (
@@ -428,53 +400,24 @@ export function DashboardPage() {
           <section className="content-card">
             <div className="card-head">
               <div>
-                <h3>Product Usage History</h3>
-                <p>{usageTotal.toLocaleString()} usage batches loaded</p>
+                <h3>History Moved To Manufacturing</h3>
+                <p>Imported records are now treated as manufacturing projects.</p>
               </div>
-              <div className="filter-grid">
-                <input placeholder="Search requester or product code" value={usageSearch} onChange={event => setUsageSearch(event.target.value)} />
-                <select value={usageCategory} onChange={event => setUsageCategory(event.target.value)}>
-                  <option value="all">All categories</option>
-                  <option value="earrings">Earrings</option>
-                  <option value="necklace">Necklace</option>
-                  <option value="bracelet">Bracelet</option>
-                  <option value="brooch">Brooch</option>
-                  <option value="clips_cufflinks">Clips & Cufflinks</option>
-                  <option value="ring">Ring</option>
-                </select>
-              </div>
+              <button type="button" className="primary-btn" onClick={() => setActiveTab('manufacturing')}>
+                Open Manufacturing
+              </button>
             </div>
 
-            {isLoadingUsage ? (
-              <p className="panel-placeholder">Loading usage batches...</p>
-            ) : (
-              <div className="usage-table-wrap">
-                <table className="usage-table">
-                  <thead>
-                    <tr>
-                      <th>Category</th>
-                      <th>Date</th>
-                      <th>Product Code</th>
-                      <th>Requester</th>
-                      <th>Total</th>
-                      <th>Lines</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {usageBatches.map(batch => (
-                      <tr key={batch.id} onClick={() => void openUsageDetail(batch.id)}>
-                        <td>{categoryLabel(batch.productCategory)}</td>
-                        <td>{formatDate(batch.transactionDate)}</td>
-                        <td>{batch.productCode ?? '-'}</td>
-                        <td>{batch.requesterName ?? '-'}</td>
-                        <td>{formatCurrency(batch.totalAmount)}</td>
-                        <td>{batch.lineCount}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <p className="panel-placeholder">
+              The old history dataset has been migrated into Manufacturing.
+              {' '}
+              Click any row in the Manufacturing tab to view full imported details (lines, costs, and notes).
+            </p>
+            <p className="panel-placeholder">
+              Archived raw usage batches currently stored:
+              {' '}
+              {isLoadingUsage ? '...' : usageTotal.toLocaleString()}
+            </p>
           </section>
         )}
 
@@ -499,49 +442,6 @@ export function DashboardPage() {
           </section>
         ) : null}
 
-        {selectedUsageBatch ? (
-          <section className="detail-drawer">
-            <div className="drawer-head">
-              <h3>Usage Batch Detail</h3>
-              <button type="button" className="secondary-btn" onClick={() => setSelectedUsageBatch(null)}>
-                Close
-              </button>
-            </div>
-            <div className="drawer-grid">
-              <p><strong>Category:</strong> {categoryLabel(selectedUsageBatch.productCategory)}</p>
-              <p><strong>Date:</strong> {formatDate(selectedUsageBatch.transactionDate)}</p>
-              <p><strong>Product Code:</strong> {selectedUsageBatch.productCode ?? '-'}</p>
-              <p><strong>Requester:</strong> {selectedUsageBatch.requesterName ?? '-'}</p>
-              <p><strong>Total:</strong> {formatCurrency(selectedUsageBatch.totalAmount)}</p>
-              <p><strong>Source:</strong> {selectedUsageBatch.sourceSheet} row {selectedUsageBatch.sourceRow ?? '-'}</p>
-            </div>
-            <div className="usage-lines">
-              <h4>Gem Usage Lines</h4>
-              <table className="usage-table">
-                <thead>
-                  <tr>
-                    <th>Gem #</th>
-                    <th>Name</th>
-                    <th>Used PCS</th>
-                    <th>Used CT</th>
-                    <th>Line Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedUsageBatch.lines.map(line => (
-                    <tr key={line.id}>
-                      <td>{line.gemstoneNumber ?? '-'}</td>
-                      <td>{line.gemstoneName ?? '-'}</td>
-                      <td>{line.usedPcs ?? '-'}</td>
-                      <td>{line.usedWeightCt ?? '-'}</td>
-                      <td>{formatCurrency(line.lineAmount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        ) : null}
       </section>
     </main>
   )
