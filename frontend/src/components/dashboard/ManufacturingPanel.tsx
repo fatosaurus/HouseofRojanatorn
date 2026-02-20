@@ -372,6 +372,7 @@ export function ManufacturingPanel() {
                     </p>
                     <p>{gem.weightUsedCt} ct / {gem.piecesUsed} pcs</p>
                     <p>{formatCurrency(gem.lineCost)}</p>
+                    {gem.notes ? <p>{gem.notes}</p> : null}
                   </article>
                 ))}
               </div>
