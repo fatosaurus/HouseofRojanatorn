@@ -1,5 +1,6 @@
 using backend.Models;
 using Microsoft.Data.SqlClient;
+using System.Data;
 using Microsoft.Extensions.Configuration;
 
 namespace backend.Services;
@@ -280,7 +281,8 @@ public sealed class GemInventorySqlService : IGemInventorySqlService
         var usageActivities = new List<InventoryUsageActivityResponse>();
         await using (var usageCmd = new SqlCommand(usageActivitySql, conn))
         {
-            usageCmd.Parameters.AddWithValue("@GemstoneNumber", item.GemstoneNumber is null ? DBNull.Value : item.GemstoneNumber);
+            var gemstoneNumberParam = usageCmd.Parameters.Add("@GemstoneNumber", SqlDbType.Int);
+            gemstoneNumberParam.Value = item.GemstoneNumber is null ? DBNull.Value : item.GemstoneNumber.Value;
             await using var usageReader = await usageCmd.ExecuteReaderAsync(cancellationToken);
             while (await usageReader.ReadAsync(cancellationToken))
             {
