@@ -51,10 +51,12 @@ var sqlConnection = builder.Configuration["SqlConnection"];
 if (!IsMissingOrPlaceholder(sqlConnection))
 {
     builder.Services.AddSingleton<ISqlDataService, SqlDataService>();
+    builder.Services.AddSingleton<IGemInventorySqlService, GemInventorySqlService>();
 }
 else
 {
     builder.Services.AddSingleton<ISqlDataService, NoopSqlDataService>();
+    builder.Services.AddSingleton<IGemInventorySqlService, NoopGemInventorySqlService>();
 }
 
 builder.UseMiddleware<CorsMiddleware>();
