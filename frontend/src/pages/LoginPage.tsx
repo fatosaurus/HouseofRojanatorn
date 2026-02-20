@@ -61,29 +61,35 @@ export function LoginPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24 }}>
-      <form
-        style={{ width: '100%', maxWidth: 420, background: 'white', borderRadius: 12, padding: 24, boxShadow: '0 10px 30px rgba(2, 6, 23, 0.08)' }}
-        onSubmit={onSubmit}
-      >
-        <h1 style={{ margin: 0, fontSize: 28 }}>House of Rojanatorn</h1>
-        <p style={{ marginTop: 8, color: '#475569' }}>Starter authentication UI</p>
+    <div className="auth-shell">
+      <div className="auth-intro">
+        <h1>House of Rojanatorn</h1>
+        <p>Customer Journey and Gemstone Operations Workspace</p>
+        <ul>
+          <li>Real 2026 workbook stock mapped into Azure SQL</li>
+          <li>Inventory and usage traceability by product code</li>
+          <li>Secure role-backed login via Cosmos + JWT</li>
+        </ul>
+      </div>
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <button type="button" onClick={() => setMode('login')} style={{ padding: '8px 12px' }}>
+      <form className="auth-card" onSubmit={onSubmit}>
+        <h2>Access Portal</h2>
+        <p>Sign in to continue or create a new internal test user.</p>
+
+        <div className="auth-mode-row">
+          <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
             Sign In
           </button>
-          <button type="button" onClick={() => setMode('create')} style={{ padding: '8px 12px' }}>
+          <button type="button" className={mode === 'create' ? 'active' : ''} onClick={() => setMode('create')}>
             Create User
           </button>
         </div>
 
-        <label style={{ display: 'block', marginTop: 12 }} htmlFor="email-input">
+        <label htmlFor="email-input">
           Email
         </label>
         <input
           id="email-input"
-          style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #cbd5e1' }}
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
@@ -91,12 +97,11 @@ export function LoginPage() {
           required
         />
 
-        <label style={{ display: 'block', marginTop: 12 }} htmlFor="password-input">
+        <label htmlFor="password-input">
           Password
         </label>
         <input
           id="password-input"
-          style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #cbd5e1' }}
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
@@ -105,9 +110,9 @@ export function LoginPage() {
           required
         />
 
-        {error ? <p style={{ marginTop: 12, color: '#b91c1c' }}>{error}</p> : null}
+        {error ? <p className="auth-error">{error}</p> : null}
 
-        <button type="submit" disabled={submitting} style={{ marginTop: 16, width: '100%', padding: '10px 12px', borderRadius: 8 }}>
+        <button type="submit" disabled={submitting} className="primary-btn">
           {submitting ? 'Please wait...' : mode === 'create' ? 'Create User and Sign In' : 'Sign In'}
         </button>
       </form>

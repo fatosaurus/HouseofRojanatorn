@@ -1,13 +1,13 @@
 # House of Rojanatorn
 
-Generic full-stack Azure scaffold.
+Gem inventory and usage operations app for House of Rojanatorn.
 
 ## Included
 
-- `backend/`: .NET 8 Azure Functions (JWT auth, Cosmos user repository, SQL connectivity service)
-- `frontend/`: React + Vite login scaffold with protected route
-- `migrations/`: baseline SQL migration
-- `tools/db/`: SQL runners (Python + .NET)
+- `backend/`: .NET 8 Azure Functions (JWT auth, Cosmos user repository, SQL-backed inventory APIs)
+- `frontend/`: React + Vite app with inventory + usage dashboard modules
+- `migrations/`: SQL schema migrations including workbook-derived inventory tables
+- `tools/db/`: SQL runners and workbook import tooling
 - `tools/cosmos/`: Cosmos provisioning and user seeding CLI
 - `.github/workflows/`: CI + backend/frontend deploy workflows
 
@@ -28,6 +28,26 @@ npm --prefix frontend ci
 npm --prefix frontend run dev
 ```
 
+## Import Workbook Data
+
+1. Apply migrations:
+
+```bash
+dotnet run --project tools/db/SqlRunner -- --file migrations/001_init.sql
+dotnet run --project tools/db/SqlRunner -- --file migrations/002_gem_inventory_schema.sql
+```
+
+2. Import workbook to Azure SQL:
+
+```bash
+python3 tools/db/import_stock_workbook.py \
+  --excel-path "/Users/suzieleedhirakul/Downloads/ROJANATORN GEMS STOCK 2026.xlsx"
+```
+
+3. Mapping reference:
+
+- `docs/stock-workbook-field-mapping.md`
+
 ## Required GitHub Secrets
 
 - `AZURE_FUNCTIONAPP_PUBLISH_PROFILE`
@@ -44,10 +64,10 @@ Set these Application Settings in the Function App:
 - `CosmosConnection`
 - `CosmosDatabaseName=houseofrojanatorn`
 - `SqlConnection`
-- `Jwt:Issuer=houseofrojanatorn`
-- `Jwt:Audience=houseofrojanatorn-clients`
-- `Jwt:SigningKey=<32+ byte secret>`
-- `Cors:AllowedOrigins=https://agreeable-meadow-05ce23e00.6.azurestaticapps.net`
+- `Jwt__Issuer=houseofrojanatorn`
+- `Jwt__Audience=houseofrojanatorn-clients`
+- `Jwt__SigningKey=<32+ byte secret>`
+- `Cors__AllowedOrigins=https://agreeable-meadow-05ce23e00.6.azurestaticapps.net`
 
 Set Function App CORS allowed origins to:
 
