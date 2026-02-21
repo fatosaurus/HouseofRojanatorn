@@ -28,6 +28,11 @@ function formatDate(raw: string | null | undefined): string {
   })
 }
 
+function getInitial(value: string): string {
+  const normalized = value.trim()
+  return normalized ? normalized.charAt(0).toUpperCase() : '?'
+}
+
 interface CustomerDraft {
   name: string
   nickname: string
@@ -92,28 +97,70 @@ interface CustomerDetailProps {
 function CustomerDetailContent({ customer, activity, noteDraft, isSaving, onNoteChange, onAddNote }: CustomerDetailProps) {
   return (
     <>
-      <div className="drawer-grid">
-        <p><strong>Name:</strong> {customer.name}</p>
-        <p><strong>Nickname:</strong> {customer.nickname ?? '-'}</p>
-        <p><strong>Email:</strong> {customer.email ?? '-'}</p>
-        <p><strong>Phone:</strong> {customer.phone ?? '-'}</p>
-        <p><strong>Customer Since:</strong> {formatDate(customer.customerSince)}</p>
-        <p><strong>Total Spent:</strong> {formatCurrency(customer.totalSpent)}</p>
-        <p><strong>Purchases:</strong> {customer.purchaseCount}</p>
-        <p><strong>Address:</strong> {customer.address ?? '-'}</p>
-      </div>
+      <section className="customer-detail-hero">
+        <span className="customer-avatar customer-avatar-large">{getInitial(customer.name)}</span>
+        <h4>{customer.name}</h4>
+        <p>
+          Customer since
+          {' '}
+          {formatDate(customer.customerSince)}
+        </p>
+      </section>
 
-      <div className="crm-note-editor">
-        <h4>Add Note</h4>
+      <section className="customer-detail-section">
+        <h4>Contact Information</h4>
+        <div className="customer-contact-grid">
+          <article>
+            <span>Email</span>
+            <p>{customer.email ?? '-'}</p>
+          </article>
+          <article>
+            <span>Phone</span>
+            <p>{customer.phone ?? '-'}</p>
+          </article>
+          <article className="customer-contact-span">
+            <span>Address</span>
+            <p>{customer.address ?? '-'}</p>
+          </article>
+          <article>
+            <span>Nickname</span>
+            <p>{customer.nickname ?? '-'}</p>
+          </article>
+        </div>
+      </section>
+
+      <section className="customer-detail-section">
+        <h4>Purchase Summary</h4>
+        <div className="customer-summary-grid">
+          <article>
+            <span>Total Spent</span>
+            <strong>{formatCurrency(customer.totalSpent)}</strong>
+          </article>
+          <article>
+            <span>Purchases</span>
+            <strong>{customer.purchaseCount}</strong>
+          </article>
+        </div>
+      </section>
+
+      {customer.notes ? (
+        <section className="customer-detail-section">
+          <h4>Notes</h4>
+          <p className="panel-placeholder">{customer.notes}</p>
+        </section>
+      ) : null}
+
+      <section className="crm-note-editor customer-note-editor">
+        <h4>Append Note</h4>
         <textarea rows={3} value={noteDraft} onChange={event => onNoteChange(event.target.value)} placeholder="Add relationship or order notes..." />
         <div className="crm-form-actions">
           <button type="button" className="primary-btn" onClick={onAddNote} disabled={isSaving || !noteDraft.trim()}>
             {isSaving ? 'Saving...' : 'Append Note'}
           </button>
         </div>
-      </div>
+      </section>
 
-      <div className="usage-lines">
+      <section className="usage-lines customer-detail-section">
         <h4>Customer Activity ({activity.length})</h4>
         {activity.length === 0 ? (
           <p className="panel-placeholder">No activity logged yet.</p>
@@ -132,7 +179,7 @@ function CustomerDetailContent({ customer, activity, noteDraft, isSaving, onNote
             ))}
           </div>
         )}
-      </div>
+      </section>
     </>
   )
 }
@@ -322,7 +369,7 @@ export function CustomersPanel() {
           <p>{totalCount.toLocaleString()} customer profiles with spend history</p>
         </div>
         <button type="button" className="primary-btn" onClick={() => setIsCreating(current => !current)}>
-          {isCreating ? 'Cancel' : 'New Customer'}
+          {isCreating ? 'Cancel' : '+ New Customer'}
         </button>
       </div>
 
@@ -385,15 +432,26 @@ export function CustomersPanel() {
             </thead>
             <tbody>
               {customers.map(customer => (
-                <tr key={customer.id} onClick={() => openCustomer(customer.id)}>
+                <tr
+                  key={customer.id}
+                  className={route.detailId === customer.id ? 'is-selected' : ''}
+                  onClick={() => openCustomer(customer.id)}
+                >
                   <td>
-                    <strong>{customer.name}</strong>
-                    {customer.nickname ? <p className="inline-subtext">{customer.nickname}</p> : null}
+                    <div className="customer-name-cell">
+                      <span className="customer-avatar">{getInitial(customer.name)}</span>
+                      <div>
+                        <strong>{customer.name}</strong>
+                        {customer.nickname ? <p className="inline-subtext">{customer.nickname}</p> : null}
+                      </div>
+                    </div>
                   </td>
                   <td>{customer.email ?? '-'}</td>
                   <td>{customer.phone ?? '-'}</td>
-                  <td>{formatCurrency(customer.totalSpent)}</td>
-                  <td>{customer.purchaseCount}</td>
+                  <td className="accent-value">{formatCurrency(customer.totalSpent)}</td>
+                  <td>
+                    <span className="metric-badge">{customer.purchaseCount}</span>
+                  </td>
                 </tr>
               ))}
             </tbody>
