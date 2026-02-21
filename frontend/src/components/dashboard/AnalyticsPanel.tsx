@@ -31,9 +31,6 @@ export function AnalyticsPanel() {
   useEffect(() => {
     let cancelled = false
 
-    setIsLoading(true)
-    setError(null)
-
     void getAnalyticsOverview()
       .then(result => {
         if (!cancelled) {

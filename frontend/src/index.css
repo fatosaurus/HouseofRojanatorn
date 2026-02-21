@@ -370,9 +370,9 @@ a:focus-visible {
 }
 
 .dashboard-main {
-  padding: 1.35rem;
+  padding: 1.85rem;
   display: grid;
-  gap: 0.95rem;
+  gap: 1.2rem;
 }
 
 .page-subtitle {
@@ -393,14 +393,14 @@ a:focus-visible {
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.8rem;
+  gap: 1rem;
 }
 
 .stats-grid article {
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 13px;
-  padding: 0.82rem;
+  padding: 1rem;
   box-shadow: var(--elev-1);
 }
 
@@ -422,7 +422,7 @@ a:focus-visible {
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 0.95rem;
+  padding: 1.25rem;
   box-shadow: var(--elev-1);
 }
 
@@ -433,9 +433,9 @@ a:focus-visible {
 .card-head {
   display: flex;
   justify-content: space-between;
-  gap: 0.9rem;
+  gap: 1rem;
   align-items: flex-start;
-  margin-bottom: 0.82rem;
+  margin-bottom: 1rem;
 }
 
 .card-head h3 {
@@ -451,7 +451,7 @@ a:focus-visible {
 .filter-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(170px, 1fr));
-  gap: 0.5rem;
+  gap: 0.75rem;
 }
 
 .filter-grid input,
@@ -567,17 +567,17 @@ a:focus-visible {
 .usage-table th {
   text-align: left;
   font-weight: 650;
-  font-size: 0.8rem;
+  font-size: 0.83rem;
   color: var(--ink-700);
   border-bottom: 1px solid var(--line);
   background: #f8fafc;
-  padding: 0.58rem 0.5rem;
+  padding: 0.75rem 0.7rem;
 }
 
 .usage-table td {
   border-bottom: 1px solid #eef2f7;
-  padding: 0.58rem 0.5rem;
-  font-size: 0.87rem;
+  padding: 0.75rem 0.7rem;
+  font-size: 0.9rem;
 }
 
 .usage-table tbody tr {
@@ -589,11 +589,11 @@ a:focus-visible {
 }
 
 .table-footer {
-  margin-top: 0.7rem;
+  margin-top: 0.9rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.6rem;
+  gap: 0.75rem;
   flex-wrap: wrap;
 }
 
@@ -605,6 +605,44 @@ a:focus-visible {
 
 .detail-drawer {
   margin-top: 0.2rem;
+}
+
+.content-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.content-split.has-detail {
+  grid-template-columns: minmax(0, 1.4fr) minmax(360px, 0.9fr);
+}
+
+.content-split-main {
+  min-width: 0;
+}
+
+.detail-side-panel {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--elev-1);
+  padding: 1.15rem;
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+.detail-page-card {
+  min-height: calc(100vh - 170px);
+}
+
+.detail-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .detail-modal-backdrop {
@@ -640,10 +678,10 @@ a:focus-visible {
 }
 
 .drawer-grid {
-  margin-top: 0.56rem;
+  margin-top: 0.65rem;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.4rem 0.8rem;
+  gap: 0.55rem 1rem;
 }
 
 .drawer-grid p {
@@ -652,7 +690,7 @@ a:focus-visible {
 }
 
 .usage-lines {
-  margin-top: 0.8rem;
+  margin-top: 1rem;
 }
 
 .usage-lines h4 {
@@ -660,29 +698,29 @@ a:focus-visible {
 }
 
 .compact-stats {
-  margin: 0.85rem 0;
+  margin: 1rem 0;
 }
 
 .single-row-filter {
-  margin-bottom: 0.85rem;
+  margin-bottom: 1rem;
   grid-template-columns: minmax(0, 1fr);
 }
 
 .crm-form-grid {
-  margin: 0.85rem 0 1rem;
-  padding: 0.78rem;
+  margin: 1rem 0 1.1rem;
+  padding: 1rem;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel-soft);
   display: grid;
-  gap: 0.55rem;
+  gap: 0.75rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .crm-form-grid label {
   display: grid;
-  gap: 0.3rem;
-  font-size: 0.82rem;
+  gap: 0.4rem;
+  font-size: 0.86rem;
   color: var(--ink-700);
 }
 
@@ -691,7 +729,7 @@ a:focus-visible {
 .crm-form-grid textarea {
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  padding: 0.48rem 0.56rem;
+  padding: 0.62rem 0.68rem;
   background: #fff;
   color: var(--ink-900);
   resize: vertical;
@@ -704,7 +742,7 @@ a:focus-visible {
 .crm-form-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.45rem;
+  gap: 0.6rem;
 }
 
 .inline-subtext {
@@ -714,7 +752,7 @@ a:focus-visible {
 }
 
 .crm-note-editor {
-  margin-top: 0.8rem;
+  margin-top: 1rem;
 }
 
 .crm-note-editor h4 {
@@ -725,19 +763,19 @@ a:focus-visible {
   width: 100%;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  padding: 0.55rem;
+  padding: 0.68rem;
   background: #fff;
 }
 
 .activity-list {
   display: grid;
-  gap: 0.42rem;
+  gap: 0.55rem;
 }
 
 .activity-list article {
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 0.5rem 0.6rem;
+  padding: 0.72rem 0.78rem;
   background: #fff;
 }
 
@@ -747,16 +785,17 @@ a:focus-visible {
 }
 
 .status-update-row {
-  margin-top: 0.8rem;
+  margin-top: 1rem;
   display: flex;
   gap: 0.5rem;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .status-update-row select {
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  padding: 0.48rem 0.56rem;
+  padding: 0.62rem 0.68rem;
   background: #fff;
 }
 
@@ -813,6 +852,15 @@ a:focus-visible {
 
   .drawer-grid {
     grid-template-columns: 1fr;
+  }
+
+  .content-split.has-detail {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-side-panel {
+    position: static;
+    max-height: none;
   }
 
   .crm-form-grid {

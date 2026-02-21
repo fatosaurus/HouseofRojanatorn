@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { addCustomerNote, createCustomer, getCustomer, getCustomerActivity, getCustomers } from '../../api/client'
 import type { Customer, CustomerActivity } from '../../api/types'
 
@@ -45,11 +46,107 @@ const EMPTY_CUSTOMER_DRAFT: CustomerDraft = {
   notes: ''
 }
 
+const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function parseCustomersRoute(pathname: string): { detailId: string | null, isFull: boolean, isInvalid: boolean } {
+  const parts = pathname.split('/').filter(Boolean)
+  if (parts[0] !== 'dashboard' || parts[1] !== 'customers') {
+    return { detailId: null, isFull: false, isInvalid: false }
+  }
+
+  const detailSegment = parts[2]
+  const fullSegment = parts[3]
+
+  if (!detailSegment) {
+    return {
+      detailId: null,
+      isFull: false,
+      isInvalid: parts.length > 2
+    }
+  }
+
+  if (!GUID_REGEX.test(detailSegment)) {
+    return { detailId: null, isFull: false, isInvalid: true }
+  }
+
+  if (fullSegment && fullSegment !== 'full') {
+    return { detailId: detailSegment, isFull: false, isInvalid: true }
+  }
+
+  return {
+    detailId: detailSegment,
+    isFull: fullSegment === 'full',
+    isInvalid: parts.length > 4
+  }
+}
+
+interface CustomerDetailProps {
+  customer: Customer
+  activity: CustomerActivity[]
+  noteDraft: string
+  isSaving: boolean
+  onNoteChange: (value: string) => void
+  onAddNote: () => void
+}
+
+function CustomerDetailContent({ customer, activity, noteDraft, isSaving, onNoteChange, onAddNote }: CustomerDetailProps) {
+  return (
+    <>
+      <div className="drawer-grid">
+        <p><strong>Name:</strong> {customer.name}</p>
+        <p><strong>Nickname:</strong> {customer.nickname ?? '-'}</p>
+        <p><strong>Email:</strong> {customer.email ?? '-'}</p>
+        <p><strong>Phone:</strong> {customer.phone ?? '-'}</p>
+        <p><strong>Customer Since:</strong> {formatDate(customer.customerSince)}</p>
+        <p><strong>Total Spent:</strong> {formatCurrency(customer.totalSpent)}</p>
+        <p><strong>Purchases:</strong> {customer.purchaseCount}</p>
+        <p><strong>Address:</strong> {customer.address ?? '-'}</p>
+      </div>
+
+      <div className="crm-note-editor">
+        <h4>Add Note</h4>
+        <textarea rows={3} value={noteDraft} onChange={event => onNoteChange(event.target.value)} placeholder="Add relationship or order notes..." />
+        <div className="crm-form-actions">
+          <button type="button" className="primary-btn" onClick={onAddNote} disabled={isSaving || !noteDraft.trim()}>
+            {isSaving ? 'Saving...' : 'Append Note'}
+          </button>
+        </div>
+      </div>
+
+      <div className="usage-lines">
+        <h4>Customer Activity ({activity.length})</h4>
+        {activity.length === 0 ? (
+          <p className="panel-placeholder">No activity logged yet.</p>
+        ) : (
+          <div className="activity-list">
+            {activity.map(item => (
+              <article key={item.id}>
+                <p>
+                  <strong>{item.status.replace(/_/g, ' ')}</strong>
+                  {' • '}
+                  {formatDate(item.activityAtUtc)}
+                </p>
+                <p>{item.manufacturingCode} / {item.pieceName}</p>
+                {item.notes ? <p>{item.notes}</p> : null}
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
 export function CustomersPanel() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const route = useMemo(() => parseCustomersRoute(location.pathname), [location.pathname])
+
   const [search, setSearch] = useState('')
   const [customers, setCustomers] = useState<Customer[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
@@ -59,6 +156,12 @@ export function CustomersPanel() {
   const [isCreating, setIsCreating] = useState(false)
   const [draft, setDraft] = useState<CustomerDraft>(EMPTY_CUSTOMER_DRAFT)
   const [isSaving, setIsSaving] = useState(false)
+
+  useEffect(() => {
+    if (route.isInvalid) {
+      navigate('/dashboard/customers', { replace: true })
+    }
+  }, [navigate, route.isInvalid])
 
   async function loadCustomers(currentSearch: string) {
     setIsLoading(true)
@@ -84,18 +187,49 @@ export function CustomersPanel() {
     void loadCustomers(search)
   }, [search])
 
-  async function openCustomer(id: string) {
-    setError(null)
-    try {
-      const [customer, activity] = await Promise.all([
-        getCustomer(id),
-        getCustomerActivity(id, 100)
-      ])
-      setSelectedCustomer(customer)
-      setSelectedActivity(activity)
-    } catch {
-      setError('Unable to load selected customer profile.')
+  useEffect(() => {
+    if (!route.detailId) {
+      setSelectedCustomer(null)
+      setSelectedActivity([])
+      setIsLoadingDetail(false)
+      setNoteDraft('')
+      return
     }
+
+    let cancelled = false
+    setIsLoadingDetail(true)
+    setError(null)
+
+    void Promise.all([
+      getCustomer(route.detailId),
+      getCustomerActivity(route.detailId, 100)
+    ])
+      .then(([customer, activity]) => {
+        if (!cancelled) {
+          setSelectedCustomer(customer)
+          setSelectedActivity(activity)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError('Unable to load selected customer profile.')
+          setSelectedCustomer(null)
+          setSelectedActivity([])
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingDetail(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [route.detailId])
+
+  function openCustomer(id: string) {
+    navigate(`/dashboard/customers/${id}`)
   }
 
   async function handleCreate() {
@@ -120,7 +254,7 @@ export function CustomersPanel() {
       setDraft(EMPTY_CUSTOMER_DRAFT)
       setIsCreating(false)
       await loadCustomers(search)
-      await openCustomer(created.id)
+      navigate(`/dashboard/customers/${created.id}`)
     } catch {
       setError('Unable to create customer.')
     } finally {
@@ -159,151 +293,192 @@ export function CustomersPanel() {
     }
   }
 
-  return (
-    <>
-      <section className="content-card">
-        <div className="card-head">
-          <div>
-            <h3>Customer Information</h3>
-            <p>{totalCount.toLocaleString()} customer profiles with spend history</p>
-          </div>
-          <button type="button" className="primary-btn" onClick={() => setIsCreating(current => !current)}>
-            {isCreating ? 'Cancel' : 'New Customer'}
-          </button>
-        </div>
+  function closeDetail() {
+    navigate('/dashboard/customers')
+  }
 
-        {error ? <p className="error-banner">{error}</p> : null}
+  function openFullDetail() {
+    if (!route.detailId) {
+      return
+    }
+
+    navigate(`/dashboard/customers/${route.detailId}/full`)
+  }
+
+  function closeFullDetail() {
+    if (!route.detailId) {
+      navigate('/dashboard/customers')
+      return
+    }
+
+    navigate(`/dashboard/customers/${route.detailId}`)
+  }
+
+  const listCard = (
+    <section className="content-card">
+      <div className="card-head">
+        <div>
+          <h3>Customer Information</h3>
+          <p>{totalCount.toLocaleString()} customer profiles with spend history</p>
+        </div>
+        <button type="button" className="primary-btn" onClick={() => setIsCreating(current => !current)}>
+          {isCreating ? 'Cancel' : 'New Customer'}
+        </button>
+      </div>
+
+      {error ? <p className="error-banner">{error}</p> : null}
 
       {isCreating ? (
-          <div className="crm-form-grid">
-            <label>
-              Name
-              <input value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} />
-            </label>
-            <label>
-              Nickname
-              <input value={draft.nickname} onChange={event => setDraft(current => ({ ...current, nickname: event.target.value }))} />
-            </label>
-            <label>
-              Email
-              <input value={draft.email} onChange={event => setDraft(current => ({ ...current, email: event.target.value }))} />
-            </label>
-            <label>
-              Phone
-              <input value={draft.phone} onChange={event => setDraft(current => ({ ...current, phone: event.target.value }))} />
-            </label>
-            <label className="crm-form-span">
-              Address
-              <input value={draft.address} onChange={event => setDraft(current => ({ ...current, address: event.target.value }))} />
-            </label>
-            <label className="crm-form-span">
-              Notes
-              <textarea rows={3} value={draft.notes} onChange={event => setDraft(current => ({ ...current, notes: event.target.value }))} />
-            </label>
-            <div className="crm-form-actions crm-form-span">
-              <button type="button" className="secondary-btn" onClick={() => setDraft(EMPTY_CUSTOMER_DRAFT)} disabled={isSaving}>
-                Reset
-              </button>
-              <button type="button" className="primary-btn" onClick={() => void handleCreate()} disabled={isSaving}>
-                {isSaving ? 'Saving...' : 'Save Customer'}
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="filter-grid single-row-filter">
-          <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by name, nickname, email, or phone" />
-        </div>
-
-        {isLoading ? (
-          <p className="panel-placeholder">Loading customer list...</p>
-        ) : (
-          <div className="usage-table-wrap">
-            <table className="usage-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Phone</th>
-                  <th>Total Spent</th>
-                  <th>Purchases</th>
-                </tr>
-              </thead>
-              <tbody>
-                {customers.map(customer => (
-                  <tr key={customer.id} onClick={() => void openCustomer(customer.id)}>
-                    <td>
-                      <strong>{customer.name}</strong>
-                      {customer.nickname ? <p className="inline-subtext">{customer.nickname}</p> : null}
-                    </td>
-                    <td>{customer.email ?? '-'}</td>
-                    <td>{customer.phone ?? '-'}</td>
-                    <td>{formatCurrency(customer.totalSpent)}</td>
-                    <td>{customer.purchaseCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {selectedCustomer ? (
-        <section className="detail-drawer">
-          <div className="drawer-head">
-            <h3>{selectedCustomer.name}</h3>
-            <button type="button" className="secondary-btn" onClick={() => setSelectedCustomer(null)}>
-              Close
+        <div className="crm-form-grid">
+          <label>
+            Name
+            <input value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} />
+          </label>
+          <label>
+            Nickname
+            <input value={draft.nickname} onChange={event => setDraft(current => ({ ...current, nickname: event.target.value }))} />
+          </label>
+          <label>
+            Email
+            <input value={draft.email} onChange={event => setDraft(current => ({ ...current, email: event.target.value }))} />
+          </label>
+          <label>
+            Phone
+            <input value={draft.phone} onChange={event => setDraft(current => ({ ...current, phone: event.target.value }))} />
+          </label>
+          <label className="crm-form-span">
+            Address
+            <input value={draft.address} onChange={event => setDraft(current => ({ ...current, address: event.target.value }))} />
+          </label>
+          <label className="crm-form-span">
+            Notes
+            <textarea rows={3} value={draft.notes} onChange={event => setDraft(current => ({ ...current, notes: event.target.value }))} />
+          </label>
+          <div className="crm-form-actions crm-form-span">
+            <button type="button" className="secondary-btn" onClick={() => setDraft(EMPTY_CUSTOMER_DRAFT)} disabled={isSaving}>
+              Reset
+            </button>
+            <button type="button" className="primary-btn" onClick={() => void handleCreate()} disabled={isSaving}>
+              {isSaving ? 'Saving...' : 'Save Customer'}
             </button>
           </div>
+        </div>
+      ) : null}
 
-          <div className="drawer-grid">
-            <p>
-              <strong>Email:</strong> {selectedCustomer.email ?? '-'}
-            </p>
-            <p>
-              <strong>Phone:</strong> {selectedCustomer.phone ?? '-'}
-            </p>
-            <p>
-              <strong>Customer Since:</strong> {formatDate(selectedCustomer.customerSince)}
-            </p>
-            <p>
-              <strong>Total Spent:</strong> {formatCurrency(selectedCustomer.totalSpent)}
-            </p>
+      <div className="filter-grid single-row-filter">
+        <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by name, nickname, email, or phone" />
+      </div>
+
+      {isLoading ? (
+        <p className="panel-placeholder">Loading customer list...</p>
+      ) : (
+        <div className="usage-table-wrap">
+          <table className="usage-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Total Spent</th>
+                <th>Purchases</th>
+              </tr>
+            </thead>
+            <tbody>
+              {customers.map(customer => (
+                <tr key={customer.id} onClick={() => openCustomer(customer.id)}>
+                  <td>
+                    <strong>{customer.name}</strong>
+                    {customer.nickname ? <p className="inline-subtext">{customer.nickname}</p> : null}
+                  </td>
+                  <td>{customer.email ?? '-'}</td>
+                  <td>{customer.phone ?? '-'}</td>
+                  <td>{formatCurrency(customer.totalSpent)}</td>
+                  <td>{customer.purchaseCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+
+  if (route.isFull) {
+    return (
+      <section className="content-card detail-page-card">
+        <div className="card-head">
+          <div>
+            <h3>Customer Details</h3>
+            <p>Full page profile view with notes and activity.</p>
           </div>
+          <div className="detail-actions-row">
+            <button type="button" className="secondary-btn" onClick={closeFullDetail}>
+              Back To Split View
+            </button>
+            <button type="button" className="secondary-btn" onClick={closeDetail}>
+              Back To Table
+            </button>
+          </div>
+        </div>
 
-          <div className="crm-note-editor">
-            <h4>Add Note</h4>
-            <textarea rows={3} value={noteDraft} onChange={event => setNoteDraft(event.target.value)} placeholder="Add relationship or order notes..." />
-            <div className="crm-form-actions">
-              <button type="button" className="primary-btn" onClick={() => void handleAddNote()} disabled={isSaving || !noteDraft.trim()}>
-                {isSaving ? 'Saving...' : 'Append Note'}
+        {isLoadingDetail ? (
+          <p className="panel-placeholder">Loading customer details...</p>
+        ) : selectedCustomer ? (
+          <CustomerDetailContent
+            customer={selectedCustomer}
+            activity={selectedActivity}
+            noteDraft={noteDraft}
+            isSaving={isSaving}
+            onNoteChange={setNoteDraft}
+            onAddNote={() => {
+              void handleAddNote()
+            }}
+          />
+        ) : (
+          <p className="panel-placeholder">No customer detail found for this route.</p>
+        )}
+      </section>
+    )
+  }
+
+  return (
+    <div className={`content-split ${route.detailId ? 'has-detail' : ''}`}>
+      <div className="content-split-main">
+        {listCard}
+      </div>
+
+      {route.detailId ? (
+        <aside className="detail-side-panel">
+          <div className="drawer-head">
+            <h3>Customer Detail</h3>
+            <div className="detail-actions-row">
+              <button type="button" className="secondary-btn" onClick={openFullDetail}>
+                Full Screen
+              </button>
+              <button type="button" className="secondary-btn" onClick={closeDetail}>
+                Close
               </button>
             </div>
           </div>
 
-          <div className="usage-lines">
-            <h4>Customer Activity</h4>
-            {selectedActivity.length === 0 ? (
-              <p className="panel-placeholder">No activity logged yet.</p>
-            ) : (
-              <div className="activity-list">
-                {selectedActivity.map(activity => (
-                  <article key={activity.id}>
-                    <p>
-                      <strong>{activity.status.replace(/_/g, ' ')}</strong>
-                      {' • '}
-                      {formatDate(activity.activityAtUtc)}
-                    </p>
-                    <p>{activity.manufacturingCode} / {activity.pieceName}</p>
-                    {activity.notes ? <p>{activity.notes}</p> : null}
-                  </article>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
+          {isLoadingDetail ? (
+            <p className="panel-placeholder">Loading customer details...</p>
+          ) : selectedCustomer ? (
+            <CustomerDetailContent
+              customer={selectedCustomer}
+              activity={selectedActivity}
+              noteDraft={noteDraft}
+              isSaving={isSaving}
+              onNoteChange={setNoteDraft}
+              onAddNote={() => {
+                void handleAddNote()
+              }}
+            />
+          ) : (
+            <p className="panel-placeholder">No customer detail found for this record.</p>
+          )}
+        </aside>
       ) : null}
-    </>
+    </div>
   )
 }
