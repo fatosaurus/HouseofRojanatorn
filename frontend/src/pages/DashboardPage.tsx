@@ -24,6 +24,17 @@ const DASHBOARD_TABS: DashboardTab[] = [
   'settings'
 ]
 
+const SIDEBAR_ITEMS: Array<{ tab: DashboardTab, label: string, short: string, glyph: string }> = [
+  { tab: 'customers', label: 'Customers', short: 'CU', glyph: 'C' },
+  { tab: 'purchases', label: 'Purchases', short: 'PU', glyph: 'P' },
+  { tab: 'inventory', label: 'Gemstones', short: 'GE', glyph: 'G' },
+  { tab: 'manufacturing', label: 'Manufacturing', short: 'MF', glyph: 'M' },
+  { tab: 'history', label: 'History', short: 'HI', glyph: 'H' },
+  { tab: 'analytics', label: 'Analytics', short: 'AN', glyph: 'A' },
+  { tab: 'users', label: 'Users', short: 'US', glyph: 'U' },
+  { tab: 'settings', label: 'Settings', short: 'SE', glyph: 'S' }
+]
+
 function resolveDashboardTab(segment: string | undefined): DashboardTab | null {
   if (!segment) {
     return null
@@ -639,38 +650,13 @@ export function DashboardPage() {
         </div>
 
         <nav className="sidebar-nav">
-          <button type="button" className={activeTab === 'customers' ? 'active' : ''} onClick={() => goToTab('customers')}>
-            <span className="label-full">Customers</span>
-            <span className="label-short">CU</span>
-          </button>
-          <button type="button" className={activeTab === 'purchases' ? 'active' : ''} onClick={() => goToTab('purchases')}>
-            <span className="label-full">Purchases</span>
-            <span className="label-short">PU</span>
-          </button>
-          <button type="button" className={activeTab === 'inventory' ? 'active' : ''} onClick={() => goToTab('inventory')}>
-            <span className="label-full">Gemstones</span>
-            <span className="label-short">GE</span>
-          </button>
-          <button type="button" className={activeTab === 'manufacturing' ? 'active' : ''} onClick={() => goToTab('manufacturing')}>
-            <span className="label-full">Manufacturing</span>
-            <span className="label-short">MF</span>
-          </button>
-          <button type="button" className={activeTab === 'history' ? 'active' : ''} onClick={() => goToTab('history')}>
-            <span className="label-full">History</span>
-            <span className="label-short">HI</span>
-          </button>
-          <button type="button" className={activeTab === 'analytics' ? 'active' : ''} onClick={() => goToTab('analytics')}>
-            <span className="label-full">Analytics</span>
-            <span className="label-short">AN</span>
-          </button>
-          <button type="button" className={activeTab === 'users' ? 'active' : ''} onClick={() => goToTab('users')}>
-            <span className="label-full">Users</span>
-            <span className="label-short">US</span>
-          </button>
-          <button type="button" className={activeTab === 'settings' ? 'active' : ''} onClick={() => goToTab('settings')}>
-            <span className="label-full">Settings</span>
-            <span className="label-short">SE</span>
-          </button>
+          {SIDEBAR_ITEMS.map(item => (
+            <button key={item.tab} type="button" className={activeTab === item.tab ? 'active' : ''} onClick={() => goToTab(item.tab)}>
+              <span className="nav-glyph" aria-hidden="true">{item.glyph}</span>
+              <span className="label-full">{item.label}</span>
+              <span className="label-short">{item.short}</span>
+            </button>
+          ))}
         </nav>
 
         <section className="sidebar-user">
@@ -679,6 +665,7 @@ export function DashboardPage() {
         </section>
 
         <button type="button" className="sidebar-signout" onClick={signOut}>
+          <span className="nav-glyph" aria-hidden="true">O</span>
           <span className="label-full">Sign Out</span>
           <span className="label-short">SO</span>
         </button>
