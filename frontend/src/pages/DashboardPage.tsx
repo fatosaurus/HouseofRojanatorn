@@ -6,8 +6,10 @@ import { AnalyticsPanel } from '../components/dashboard/AnalyticsPanel'
 import { CustomersPanel } from '../components/dashboard/CustomersPanel'
 import { ManufacturingPanel } from '../components/dashboard/ManufacturingPanel'
 import { PurchasesPanel } from '../components/dashboard/PurchasesPanel'
+import { SettingsPanel } from '../components/dashboard/SettingsPanel'
+import { UsersPanel } from '../components/dashboard/UsersPanel'
 
-type DashboardTab = 'customers' | 'purchases' | 'inventory' | 'manufacturing' | 'usage' | 'analytics'
+type DashboardTab = 'customers' | 'purchases' | 'inventory' | 'manufacturing' | 'usage' | 'analytics' | 'users' | 'settings'
 const INVENTORY_PAGE_SIZE = 50
 
 function formatCurrency(value: number | null | undefined): string {
@@ -216,6 +218,10 @@ export function DashboardPage() {
       ? 'Customer profiles and relationship notes linked to purchases.'
       : activeTab === 'manufacturing'
         ? 'Production workflow records aligned with the reference prototype.'
+        : activeTab === 'users'
+          ? 'Invite, activate, and manage platform users and roles.'
+          : activeTab === 'settings'
+            ? 'Configure production steps and dynamic manufacturing form fields.'
         : activeTab === 'purchases'
           ? 'Sold records derived from manufacturing projects with status = sold.'
           : activeTab === 'analytics'
@@ -272,6 +278,14 @@ export function DashboardPage() {
             <span className="label-full">Analytics</span>
             <span className="label-short">AN</span>
           </button>
+          <button type="button" className={activeTab === 'users' ? 'active' : ''} onClick={() => setActiveTab('users')}>
+            <span className="label-full">Users</span>
+            <span className="label-short">US</span>
+          </button>
+          <button type="button" className={activeTab === 'settings' ? 'active' : ''} onClick={() => setActiveTab('settings')}>
+            <span className="label-full">Settings</span>
+            <span className="label-short">SE</span>
+          </button>
         </nav>
 
         <section className="sidebar-user">
@@ -319,6 +333,10 @@ export function DashboardPage() {
           <PurchasesPanel />
         ) : activeTab === 'analytics' ? (
           <AnalyticsPanel />
+        ) : activeTab === 'users' ? (
+          <UsersPanel />
+        ) : activeTab === 'settings' ? (
+          <SettingsPanel />
         ) : activeTab === 'inventory' ? (
           <section className="content-card">
             <div className="card-head">

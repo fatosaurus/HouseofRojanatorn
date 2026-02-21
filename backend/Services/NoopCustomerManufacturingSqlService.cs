@@ -51,6 +51,46 @@ public sealed class NoopCustomerManufacturingSqlService : ICustomerManufacturing
     public Task<bool> DeleteManufacturingProjectAsync(int projectId, CancellationToken cancellationToken = default)
         => Task.FromResult(false);
 
+    public Task<ManufacturingSettingsResponse> GetManufacturingSettingsAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(new ManufacturingSettingsResponse
+        {
+            Steps = ManufacturingStatuses.Defaults
+                .Select((step, index) => new ManufacturingProcessStepResponse
+                {
+                    StepKey = step,
+                    Label = step.Replace('_', ' '),
+                    SortOrder = index + 1,
+                    IsActive = true
+                })
+                .ToList(),
+            Fields =
+            [
+                new ManufacturingCustomFieldResponse
+                {
+                    FieldKey = "designerName",
+                    Label = "Designer",
+                    FieldType = "text",
+                    SortOrder = 1,
+                    IsActive = true,
+                    IsSystem = true
+                },
+                new ManufacturingCustomFieldResponse
+                {
+                    FieldKey = "craftsmanName",
+                    Label = "Craftsman",
+                    FieldType = "text",
+                    SortOrder = 2,
+                    IsActive = true,
+                    IsSystem = true
+                }
+            ]
+        });
+
+    public Task<ManufacturingSettingsResponse> SaveManufacturingSettingsAsync(
+        ManufacturingSettingsUpdateRequest request,
+        CancellationToken cancellationToken = default)
+        => GetManufacturingSettingsAsync(cancellationToken);
+
     public Task<AnalyticsOverviewResponse> GetAnalyticsAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(new AnalyticsOverviewResponse
         {

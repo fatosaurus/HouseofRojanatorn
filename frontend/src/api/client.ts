@@ -7,18 +7,27 @@ import type {
   Customer,
   CustomerActivity,
   CustomerUpsertRequest,
+  InviteDetails,
+  InviteResponse,
   InventoryItem,
   InventoryItemDetail,
   InventoryManufacturingActivity,
   InventorySummary,
   InventoryUsageActivity,
   MeProfile,
+  ManufacturingCustomField,
   ManufacturingActivityLog,
   ManufacturingGemstone,
+  ManufacturingNoteParseResponse,
   ManufacturingProjectDetail,
   ManufacturingProjectSummary,
+  ManufacturingProcessStep,
   ManufacturingProjectUpsertRequest,
+  ManufacturingSettings,
+  ManufacturingSettingsUpdateRequest,
   PagedResponse,
+  UserListResponse,
+  UserSummary,
   UsageBatch,
   UsageBatchDetail,
   UsageLine
@@ -58,6 +67,49 @@ function mapMeResponse(record: UnknownRecord): MeProfile {
     userId: String(pick<string>(record, 'userId', 'UserId') ?? ''),
     email: String(pick<string>(record, 'email', 'Email') ?? ''),
     role: normalizeRole(pick<string>(record, 'role', 'Role'))
+  }
+}
+
+function mapUserSummary(record: UnknownRecord): UserSummary {
+  const statusRaw = readString(record, 'status', 'Status')
+  return {
+    id: String(pick<string>(record, 'id', 'Id') ?? ''),
+    email: readString(record, 'email', 'Email') ?? '',
+    role: normalizeRole(readString(record, 'role', 'Role')),
+    status: statusRaw === 'invited' ? 'invited' : 'active',
+    createdAtUtc: readString(record, 'createdAtUtc', 'CreatedAtUtc') ?? '',
+    activatedAtUtc: readString(record, 'activatedAtUtc', 'ActivatedAtUtc'),
+    lastLoginAtUtc: readString(record, 'lastLoginAtUtc', 'LastLoginAtUtc'),
+    inviteExpiresAtUtc: readString(record, 'inviteExpiresAtUtc', 'InviteExpiresAtUtc')
+  }
+}
+
+function mapUserListResponse(record: UnknownRecord): UserListResponse {
+  const rawItems = pick<unknown[]>(record, 'items', 'Items') ?? []
+  const items = rawItems
+    .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+    .map(mapUserSummary)
+
+  return {
+    items,
+    continuationToken: readString(record, 'continuationToken', 'ContinuationToken')
+  }
+}
+
+function mapInviteResponse(record: UnknownRecord): InviteResponse {
+  return {
+    email: readString(record, 'email', 'Email') ?? '',
+    role: normalizeRole(readString(record, 'role', 'Role')),
+    token: readString(record, 'token', 'Token') ?? '',
+    expiresAtUtc: readString(record, 'expiresAtUtc', 'ExpiresAtUtc') ?? ''
+  }
+}
+
+function mapInviteDetails(record: UnknownRecord): InviteDetails {
+  return {
+    email: readString(record, 'email', 'Email') ?? '',
+    role: normalizeRole(readString(record, 'role', 'Role')),
+    expiresAtUtc: readString(record, 'expiresAtUtc', 'ExpiresAtUtc') ?? ''
   }
 }
 
@@ -234,6 +286,31 @@ function readStringArray(record: UnknownRecord, camel: string, pascal: string): 
     .filter(item => item.length > 0)
 }
 
+function readStringRecord(record: UnknownRecord, camel: string, pascal: string): Record<string, string | null> {
+  const value = pick<unknown>(record, camel, pascal)
+  if (typeof value !== 'object' || value == null || Array.isArray(value)) {
+    return {}
+  }
+
+  const output: Record<string, string | null> = {}
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const normalizedKey = key.trim()
+    if (!normalizedKey) {
+      continue
+    }
+
+    if (item == null) {
+      output[normalizedKey] = null
+      continue
+    }
+
+    const text = String(item).trim()
+    output[normalizedKey] = text.length > 0 ? text : null
+  }
+
+  return output
+}
+
 function mapCustomer(record: UnknownRecord): Customer {
   return {
     id: String(pick<string>(record, 'id', 'Id') ?? ''),
@@ -310,7 +387,8 @@ function mapManufacturingSummary(record: UnknownRecord): ManufacturingProjectSum
     soldAt: readString(record, 'soldAt', 'SoldAt'),
     createdAtUtc: readString(record, 'createdAtUtc', 'CreatedAtUtc') ?? '',
     updatedAtUtc: readString(record, 'updatedAtUtc', 'UpdatedAtUtc') ?? '',
-    gemstoneCount: readNumber(record, 'gemstoneCount', 'GemstoneCount') ?? 0
+    gemstoneCount: readNumber(record, 'gemstoneCount', 'GemstoneCount') ?? 0,
+    customFields: readStringRecord(record, 'customFields', 'CustomFields')
   }
 }
 
@@ -342,12 +420,78 @@ function mapManufacturingDetail(record: UnknownRecord): ManufacturingProjectDeta
     soldAt: readString(record, 'soldAt', 'SoldAt'),
     createdAtUtc: readString(record, 'createdAtUtc', 'CreatedAtUtc') ?? '',
     updatedAtUtc: readString(record, 'updatedAtUtc', 'UpdatedAtUtc') ?? '',
+    customFields: readStringRecord(record, 'customFields', 'CustomFields'),
     gemstones: rawGemstones
       .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
       .map(mapManufacturingGemstone),
     activityLog: rawActivity
       .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
       .map(mapManufacturingActivity)
+  }
+}
+
+function mapManufacturingStep(record: UnknownRecord): ManufacturingProcessStep {
+  return {
+    stepKey: readString(record, 'stepKey', 'StepKey') ?? '',
+    label: readString(record, 'label', 'Label') ?? '',
+    sortOrder: readNumber(record, 'sortOrder', 'SortOrder') ?? 0,
+    requirePhoto: Boolean(pick<unknown>(record, 'requirePhoto', 'RequirePhoto')),
+    requireComment: Boolean(pick<unknown>(record, 'requireComment', 'RequireComment')),
+    isActive: Boolean(pick<unknown>(record, 'isActive', 'IsActive'))
+  }
+}
+
+function mapManufacturingField(record: UnknownRecord): ManufacturingCustomField {
+  return {
+    fieldKey: readString(record, 'fieldKey', 'FieldKey') ?? '',
+    label: readString(record, 'label', 'Label') ?? '',
+    fieldType: (readString(record, 'fieldType', 'FieldType') as ManufacturingCustomField['fieldType']) ?? 'text',
+    sortOrder: readNumber(record, 'sortOrder', 'SortOrder') ?? 0,
+    isRequired: Boolean(pick<unknown>(record, 'isRequired', 'IsRequired')),
+    isActive: Boolean(pick<unknown>(record, 'isActive', 'IsActive')),
+    isSystem: Boolean(pick<unknown>(record, 'isSystem', 'IsSystem')),
+    options: readStringArray(record, 'options', 'Options')
+  }
+}
+
+function mapManufacturingSettings(record: UnknownRecord): ManufacturingSettings {
+  const rawSteps = pick<unknown[]>(record, 'steps', 'Steps') ?? []
+  const rawFields = pick<unknown[]>(record, 'fields', 'Fields') ?? []
+
+  return {
+    steps: rawSteps
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(mapManufacturingStep),
+    fields: rawFields
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(mapManufacturingField)
+  }
+}
+
+function mapManufacturingNoteParseResponse(record: UnknownRecord): ManufacturingNoteParseResponse {
+  const rawGemstones = pick<unknown[]>(record, 'gemstones', 'Gemstones') ?? []
+  return {
+    manufacturingCode: readString(record, 'manufacturingCode', 'ManufacturingCode'),
+    pieceName: readString(record, 'pieceName', 'PieceName'),
+    pieceType: readString(record, 'pieceType', 'PieceType'),
+    status: readString(record, 'status', 'Status') ?? 'approved',
+    designerName: readString(record, 'designerName', 'DesignerName'),
+    craftsmanName: readString(record, 'craftsmanName', 'CraftsmanName'),
+    usageNotes: readString(record, 'usageNotes', 'UsageNotes'),
+    totalCost: readNumber(record, 'totalCost', 'TotalCost'),
+    sellingPrice: readNumber(record, 'sellingPrice', 'SellingPrice'),
+    customFields: readStringRecord(record, 'customFields', 'CustomFields'),
+    gemstones: rawGemstones
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(item => ({
+        inventoryItemId: readNumber(item, 'inventoryItemId', 'InventoryItemId'),
+        gemstoneCode: readString(item, 'gemstoneCode', 'GemstoneCode'),
+        gemstoneType: readString(item, 'gemstoneType', 'GemstoneType'),
+        piecesUsed: readNumber(item, 'piecesUsed', 'PiecesUsed'),
+        weightUsedCt: readNumber(item, 'weightUsedCt', 'WeightUsedCt'),
+        lineCost: readNumber(item, 'lineCost', 'LineCost'),
+        notes: readString(item, 'notes', 'Notes')
+      }))
   }
 }
 
@@ -404,6 +548,54 @@ export async function createUser(email: string, password: string, role: AppRole 
     method: 'POST',
     body: JSON.stringify({ email, password, role }),
     skipAuth: true
+  })
+  return mapAuthResponse(response)
+}
+
+export async function listUsers(limit = 120, continuationToken?: string | null): Promise<UserListResponse> {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  if (continuationToken?.trim()) {
+    params.set('continuationToken', continuationToken.trim())
+  }
+
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/users?${params.toString()}`)
+  return mapUserListResponse(response)
+}
+
+export async function deleteUser(userId: string): Promise<void> {
+  await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE'
+  })
+}
+
+export async function inviteUser(email: string, role: AppRole = 'member', expiresInDays = 7): Promise<InviteResponse> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/users/invite`, {
+    method: 'POST',
+    body: JSON.stringify({
+      email,
+      role,
+      expiresInDays
+    })
+  })
+  return mapInviteResponse(response)
+}
+
+export async function getInviteDetails(token: string): Promise<InviteDetails> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/users/invite/${encodeURIComponent(token)}`, {
+    skipAuth: true
+  })
+  return mapInviteDetails(response)
+}
+
+export async function acceptInvite(token: string, password: string): Promise<AuthResponse> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/users/invite/accept`, {
+    method: 'POST',
+    skipAuth: true,
+    body: JSON.stringify({
+      token,
+      password
+    })
   })
   return mapAuthResponse(response)
 }
@@ -577,6 +769,27 @@ export async function deleteManufacturingProject(id: number): Promise<void> {
   await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing/${id}`, {
     method: 'DELETE'
   })
+}
+
+export async function getManufacturingSettings(): Promise<ManufacturingSettings> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing/settings`)
+  return mapManufacturingSettings(response)
+}
+
+export async function updateManufacturingSettings(payload: ManufacturingSettingsUpdateRequest): Promise<ManufacturingSettings> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing/settings`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  })
+  return mapManufacturingSettings(response)
+}
+
+export async function parseManufacturingNote(noteText: string): Promise<ManufacturingNoteParseResponse> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing/ai/parse-note`, {
+    method: 'POST',
+    body: JSON.stringify({ noteText })
+  })
+  return mapManufacturingNoteParseResponse(response)
 }
 
 export async function getAnalyticsOverview(): Promise<AnalyticsOverview> {

@@ -24,6 +24,12 @@ dotnet run --project tools/db/SqlRunner -- --file migrations/001_init.sql
 dotnet run --project tools/db/SqlRunner -- --query "SELECT TOP 5 * FROM dbo.app_settings"
 ```
 
+If only .NET 10 runtime is installed locally, add `-f net10.0`:
+
+```bash
+dotnet run --project tools/db/SqlRunner -f net10.0 -- --file migrations/001_init.sql
+```
+
 ## Import Workbook Data
 
 `import_stock_workbook.py` parses the `ROJANATORN GEMS STOCK 2026.xlsx` workbook and writes data into:

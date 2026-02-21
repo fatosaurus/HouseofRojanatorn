@@ -13,7 +13,7 @@ public static class ManufacturingStatuses
     public const string ReadyForSale = "ready_for_sale";
     public const string Sold = "sold";
 
-    public static readonly IReadOnlySet<string> Allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    public static readonly IReadOnlyList<string> Defaults = new[]
     {
         Approved,
         SentToCraftsman,
@@ -34,8 +34,13 @@ public static class ManufacturingStatuses
             return fallback;
         }
 
-        var normalized = value.Trim().ToLowerInvariant();
-        return Allowed.Contains(normalized) ? normalized : fallback;
+        var normalized = value
+            .Trim()
+            .ToLowerInvariant()
+            .Replace('-', '_')
+            .Replace(' ', '_');
+
+        return string.IsNullOrWhiteSpace(normalized) ? fallback : normalized;
     }
 }
 
@@ -155,6 +160,7 @@ public sealed class ManufacturingProjectSummaryResponse
     public DateTime CreatedAtUtc { get; init; }
     public DateTime UpdatedAtUtc { get; init; }
     public int GemstoneCount { get; init; }
+    public IReadOnlyDictionary<string, string?> CustomFields { get; init; } = new Dictionary<string, string?>();
 }
 
 public sealed class ManufacturingProjectDetailResponse
@@ -184,6 +190,7 @@ public sealed class ManufacturingProjectDetailResponse
     public DateTime UpdatedAtUtc { get; init; }
     public IReadOnlyList<ManufacturingGemstoneResponse> Gemstones { get; init; } = [];
     public IReadOnlyList<ManufacturingActivityLogResponse> ActivityLog { get; init; } = [];
+    public IReadOnlyDictionary<string, string?> CustomFields { get; init; } = new Dictionary<string, string?>();
 }
 
 public sealed class ManufacturingGemstoneUpsertRequest
@@ -220,6 +227,82 @@ public sealed class ManufacturingProjectUpsertRequest
     public DateTime? SoldAt { get; init; }
     public IReadOnlyList<ManufacturingGemstoneUpsertRequest>? Gemstones { get; init; }
     public string? ActivityNote { get; init; }
+    public IReadOnlyDictionary<string, string?>? CustomFields { get; init; }
+}
+
+public sealed class ManufacturingProcessStepResponse
+{
+    public string StepKey { get; init; } = string.Empty;
+    public string Label { get; init; } = string.Empty;
+    public int SortOrder { get; init; }
+    public bool RequirePhoto { get; init; }
+    public bool RequireComment { get; init; }
+    public bool IsActive { get; init; }
+}
+
+public sealed class ManufacturingCustomFieldResponse
+{
+    public string FieldKey { get; init; } = string.Empty;
+    public string Label { get; init; } = string.Empty;
+    public string FieldType { get; init; } = "text";
+    public int SortOrder { get; init; }
+    public bool IsRequired { get; init; }
+    public bool IsActive { get; init; }
+    public bool IsSystem { get; init; }
+    public IReadOnlyList<string> Options { get; init; } = [];
+}
+
+public sealed class ManufacturingSettingsResponse
+{
+    public IReadOnlyList<ManufacturingProcessStepResponse> Steps { get; init; } = [];
+    public IReadOnlyList<ManufacturingCustomFieldResponse> Fields { get; init; } = [];
+}
+
+public sealed class ManufacturingProcessStepUpsertRequest
+{
+    public string? StepKey { get; init; }
+    public string? Label { get; init; }
+    public int? SortOrder { get; init; }
+    public bool RequirePhoto { get; init; }
+    public bool RequireComment { get; init; }
+    public bool IsActive { get; init; } = true;
+}
+
+public sealed class ManufacturingCustomFieldUpsertRequest
+{
+    public string? FieldKey { get; init; }
+    public string? Label { get; init; }
+    public string? FieldType { get; init; }
+    public int? SortOrder { get; init; }
+    public bool IsRequired { get; init; }
+    public bool IsActive { get; init; } = true;
+    public IReadOnlyList<string>? Options { get; init; }
+}
+
+public sealed class ManufacturingSettingsUpdateRequest
+{
+    public IReadOnlyList<ManufacturingProcessStepUpsertRequest>? Steps { get; init; }
+    public IReadOnlyList<ManufacturingCustomFieldUpsertRequest>? Fields { get; init; }
+}
+
+public sealed class ManufacturingNoteParseRequest
+{
+    public string? NoteText { get; init; }
+}
+
+public sealed class ManufacturingNoteParseResponse
+{
+    public string? ManufacturingCode { get; init; }
+    public string? PieceName { get; init; }
+    public string? PieceType { get; init; }
+    public string Status { get; init; } = ManufacturingStatuses.Approved;
+    public string? DesignerName { get; init; }
+    public string? CraftsmanName { get; init; }
+    public string? UsageNotes { get; init; }
+    public decimal? TotalCost { get; init; }
+    public decimal? SellingPrice { get; init; }
+    public IReadOnlyDictionary<string, string?> CustomFields { get; init; } = new Dictionary<string, string?>();
+    public IReadOnlyList<ManufacturingGemstoneUpsertRequest> Gemstones { get; init; } = [];
 }
 
 public sealed class AnalyticsCurrentMonthResponse

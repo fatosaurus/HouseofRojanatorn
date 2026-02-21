@@ -1,10 +1,7 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { createUser } from '../api/client'
+import { Link, useNavigate } from 'react-router-dom'
 import { useSession } from '../app/useSession'
 import { HttpError } from '../lib/http'
-
-type AuthMode = 'login' | 'create'
 
 function toUiError(error: unknown): string {
   if (error instanceof HttpError) {
@@ -12,12 +9,8 @@ function toUiError(error: unknown): string {
       return 'Invalid credentials. Please check your email and password.'
     }
 
-    if (error.status === 409) {
-      return 'User already exists. Switch to Sign In.'
-    }
-
     if (error.status === 400) {
-      return 'Invalid request. Ensure email is valid and password has at least 8 characters.'
+      return 'Invalid request. Ensure email and password are both provided.'
     }
   }
 
@@ -31,7 +24,6 @@ function toUiError(error: unknown): string {
 export function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [mode, setMode] = useState<AuthMode>('login')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
@@ -39,19 +31,12 @@ export function LoginPage() {
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!email.trim()) {
-      return
-    }
 
     setSubmitting(true)
     setError(null)
 
     try {
-      if (mode === 'create') {
-        await createUser(email.trim().toLowerCase(), password)
-      }
-
-      await signIn(email, password)
+      await signIn(email.trim().toLowerCase(), password)
       navigate('/dashboard')
     } catch (caughtError) {
       setError(toUiError(caughtError))
@@ -68,22 +53,13 @@ export function LoginPage() {
         <ul>
           <li>Real 2026 workbook stock mapped into Azure SQL</li>
           <li>Inventory and usage traceability by product code</li>
-          <li>Secure role-backed login via Cosmos + JWT</li>
+          <li>Role-based access with invite and password setup flow</li>
         </ul>
       </div>
 
       <form className="auth-card" onSubmit={onSubmit}>
-        <h2>Access Portal</h2>
-        <p>Sign in to continue or create a new internal test user.</p>
-
-        <div className="auth-mode-row">
-          <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
-            Sign In
-          </button>
-          <button type="button" className={mode === 'create' ? 'active' : ''} onClick={() => setMode('create')}>
-            Create User
-          </button>
-        </div>
+        <h2>Sign In</h2>
+        <p>Use your invited account credentials to access the platform.</p>
 
         <label htmlFor="email-input">
           Email
@@ -105,7 +81,7 @@ export function LoginPage() {
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          placeholder="minimum 8 characters"
+          placeholder="your password"
           minLength={8}
           required
         />
@@ -113,8 +89,14 @@ export function LoginPage() {
         {error ? <p className="auth-error">{error}</p> : null}
 
         <button type="submit" disabled={submitting} className="primary-btn">
-          {submitting ? 'Please wait...' : mode === 'create' ? 'Create User and Sign In' : 'Sign In'}
+          {submitting ? 'Please wait...' : 'Sign In'}
         </button>
+
+        <p>
+          Need to set your password from an invite?
+          {' '}
+          <Link to="/accept-invite">Open invite setup</Link>
+        </p>
       </form>
     </div>
   )
