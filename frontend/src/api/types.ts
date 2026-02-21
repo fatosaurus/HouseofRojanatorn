@@ -6,6 +6,35 @@ export interface AuthResponse {
   role: AppRole
 }
 
+export interface UserSummary {
+  id: string
+  email: string
+  role: AppRole
+  status: 'active' | 'invited'
+  createdAtUtc: string
+  activatedAtUtc: string | null
+  lastLoginAtUtc: string | null
+  inviteExpiresAtUtc: string | null
+}
+
+export interface UserListResponse {
+  items: UserSummary[]
+  continuationToken: string | null
+}
+
+export interface InviteResponse {
+  email: string
+  role: AppRole
+  token: string
+  expiresAtUtc: string
+}
+
+export interface InviteDetails {
+  email: string
+  role: AppRole
+  expiresAtUtc: string
+}
+
 export interface MeProfile {
   userId: string
   email: string
@@ -195,6 +224,7 @@ export interface ManufacturingProjectSummary {
   createdAtUtc: string
   updatedAtUtc: string
   gemstoneCount: number
+  customFields: Record<string, string | null>
 }
 
 export interface ManufacturingProjectDetail {
@@ -223,6 +253,7 @@ export interface ManufacturingProjectDetail {
   updatedAtUtc: string
   gemstones: ManufacturingGemstone[]
   activityLog: ManufacturingActivityLog[]
+  customFields: Record<string, string | null>
 }
 
 export interface ManufacturingGemstoneUpsertRequest {
@@ -257,6 +288,70 @@ export interface ManufacturingProjectUpsertRequest {
   soldAt?: string | null
   gemstones?: ManufacturingGemstoneUpsertRequest[] | null
   activityNote?: string | null
+  customFields?: Record<string, string | null> | null
+}
+
+export interface ManufacturingProcessStep {
+  stepKey: string
+  label: string
+  sortOrder: number
+  requirePhoto: boolean
+  requireComment: boolean
+  isActive: boolean
+}
+
+export interface ManufacturingCustomField {
+  fieldKey: string
+  label: string
+  fieldType: 'text' | 'textarea' | 'number' | 'date' | 'select'
+  sortOrder: number
+  isRequired: boolean
+  isActive: boolean
+  isSystem: boolean
+  options: string[]
+}
+
+export interface ManufacturingSettings {
+  steps: ManufacturingProcessStep[]
+  fields: ManufacturingCustomField[]
+}
+
+export interface ManufacturingProcessStepUpsertRequest {
+  stepKey?: string | null
+  label?: string | null
+  sortOrder?: number | null
+  requirePhoto?: boolean
+  requireComment?: boolean
+  isActive?: boolean
+}
+
+export interface ManufacturingCustomFieldUpsertRequest {
+  fieldKey?: string | null
+  label?: string | null
+  fieldType?: string | null
+  sortOrder?: number | null
+  isRequired?: boolean
+  isActive?: boolean
+  options?: string[] | null
+}
+
+export interface ManufacturingSettingsUpdateRequest {
+  steps?: ManufacturingProcessStepUpsertRequest[] | null
+  fields?: ManufacturingCustomFieldUpsertRequest[] | null
+}
+
+export interface ManufacturingNoteParseResponse {
+  manufacturingCode: string | null
+  pieceName: string | null
+  pieceType: string | null
+  status: string
+  designerName: string | null
+  craftsmanName: string | null
+  usageNotes: string | null
+  totalCost: number | null
+  sellingPrice: number | null
+  customFields: Record<string, string | null>
+  gemstones: ManufacturingGemstoneUpsertRequest[]
 }
 
 export interface AnalyticsCurrentMonth {

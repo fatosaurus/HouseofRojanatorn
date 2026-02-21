@@ -12,6 +12,8 @@ public class JwtValidationMiddleware : IFunctionsWorkerMiddleware
     [
         "CreateUser",
         "Login",
+        "GetInviteDetails",
+        "AcceptInvite",
         "CorsPreflight",
         "GetHealth"
     ];

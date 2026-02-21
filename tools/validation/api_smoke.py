@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import random
 import string
 import urllib.error
@@ -62,16 +63,52 @@ def main() -> int:
     status, payload = http_json('GET', f'{base_url}/health')
     expect(status == 200, f'GET /health expected 200, got {status}: {payload}')
 
-    email = f'smoke.{smoke_id}@example.local'
-    status, created = http_json('POST', f'{base_url}/users', body={'email': email, 'password': 'Password123!', 'role': 'admin'})
-    expect(status == 201, f'POST /users expected 201, got {status}: {created}')
-    expect(isinstance(created, dict), 'Create user response must be object')
+    admin_email = os.getenv('SMOKE_ADMIN_EMAIL', 'admin@houseofrojanatorn.local').strip().lower()
+    admin_password = os.getenv('SMOKE_ADMIN_PASSWORD', 'Admin!23456').strip()
+    status, login = http_json('POST', f'{base_url}/login', body={'email': admin_email, 'password': admin_password})
 
-    token = pick(created, 'token', 'Token')
-    expect(isinstance(token, str) and len(token) > 20, 'Create user did not return token')
+    if status == 200 and isinstance(login, dict):
+        token = pick(login, 'token', 'Token')
+        expect(isinstance(token, str) and len(token) > 20, 'POST /login did not return token')
+    else:
+        bootstrap_email = f'smoke.bootstrap.{smoke_id}@example.local'
+        bootstrap_password = 'Password123!'
+        status, created = http_json(
+            'POST',
+            f'{base_url}/users',
+            body={'email': bootstrap_email, 'password': bootstrap_password, 'role': 'admin'})
+        expect(
+            status == 201 and isinstance(created, dict),
+            f'Bootstrap POST /users expected 201, got {status}: {created}')
+        token = pick(created, 'token', 'Token')
+        expect(isinstance(token, str) and len(token) > 20, 'Bootstrap user did not return token')
 
-    status, login = http_json('POST', f'{base_url}/login', body={'email': email, 'password': 'Password123!'})
-    expect(status == 200, f'POST /login expected 200, got {status}: {login}')
+        status, login = http_json('POST', f'{base_url}/login', body={'email': bootstrap_email, 'password': bootstrap_password})
+        expect(status == 200, f'Bootstrap POST /login expected 200, got {status}: {login}')
+
+    invite_email = f'smoke.invite.{smoke_id}@example.local'
+    status, invite = http_json(
+        'POST',
+        f'{base_url}/users/invite',
+        token=token,
+        body={'email': invite_email, 'role': 'member', 'expiresInDays': 7})
+    expect(status == 201, f'POST /users/invite expected 201, got {status}: {invite}')
+    expect(isinstance(invite, dict), '/users/invite response must be object')
+    invite_token = pick(invite, 'token', 'Token')
+    expect(isinstance(invite_token, str) and len(invite_token) > 10, 'Invite token missing')
+
+    status, invite_details = http_json('GET', f'{base_url}/users/invite/{invite_token}')
+    expect(status == 200, f'GET /users/invite/{{token}} expected 200, got {status}: {invite_details}')
+
+    invite_password = 'Password123!'
+    status, accepted = http_json(
+        'POST',
+        f'{base_url}/users/invite/accept',
+        body={'token': invite_token, 'password': invite_password})
+    expect(status == 200, f'POST /users/invite/accept expected 200, got {status}: {accepted}')
+
+    status, invited_login = http_json('POST', f'{base_url}/login', body={'email': invite_email, 'password': invite_password})
+    expect(status == 200, f'Invited account POST /login expected 200, got {status}: {invited_login}')
 
     status, profile = http_json('GET', f'{base_url}/me/profile', token=token)
     expect(status == 200, f'GET /me/profile expected 200, got {status}: {profile}')
@@ -146,6 +183,8 @@ def main() -> int:
         'pieceType': 'pendant',
         'status': 'approved',
         'designerName': 'Smoke QA',
+        'usageNotes': 'Smoke baseline note',
+        'photos': ['https://example.com/smoke-note.jpg'],
         'sellingPrice': 1000,
         'totalCost': 700,
         'gemstones': []

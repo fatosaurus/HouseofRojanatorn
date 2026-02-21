@@ -1,24 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   createManufacturingProject,
   getManufacturingProject,
   getManufacturingProjects,
+  getManufacturingSettings,
+  parseManufacturingNote,
   updateManufacturingProject
 } from '../../api/client'
-import type { ManufacturingProjectDetail, ManufacturingProjectSummary } from '../../api/types'
-
-const STATUS_OPTIONS = [
-  'approved',
-  'sent_to_craftsman',
-  'internal_setting_qc',
-  'diamond_sorting',
-  'stone_setting',
-  'plating',
-  'final_piece_qc',
-  'complete_piece',
-  'ready_for_sale',
-  'sold'
-]
+import type {
+  ManufacturingCustomField,
+  ManufacturingGemstoneUpsertRequest,
+  ManufacturingProjectDetail,
+  ManufacturingProjectSummary,
+  ManufacturingSettings
+} from '../../api/types'
 
 const PIECE_TYPES = ['earrings', 'bracelet', 'choker', 'necklace', 'brooch', 'ring', 'pendant', 'other']
 
@@ -26,6 +21,7 @@ function labelize(value: string | null | undefined): string {
   if (!value) {
     return '-'
   }
+
   return value
     .split('_')
     .filter(Boolean)
@@ -58,6 +54,63 @@ function formatDate(raw: string | null | undefined): string {
   })
 }
 
+function parsePhotos(value: string): string[] {
+  return value
+    .split(/[,\n]/)
+    .map(item => item.trim())
+    .filter(item => item.length > 0)
+}
+
+interface OcrWorkerResult {
+  data?: {
+    text?: string
+  }
+}
+
+interface OcrWorker {
+  recognize(source: File): Promise<OcrWorkerResult>
+  terminate(): Promise<void>
+}
+
+interface OcrRuntime {
+  createWorker(language: string): Promise<OcrWorker>
+}
+
+declare global {
+  interface Window {
+    Tesseract?: OcrRuntime
+  }
+}
+
+async function ensureOcrRuntime(): Promise<OcrRuntime> {
+  if (window.Tesseract) {
+    return window.Tesseract
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-ocr-runtime="tesseract"]')
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true })
+      existing.addEventListener('error', () => reject(new Error('Unable to load OCR runtime.')), { once: true })
+      return
+    }
+
+    const script = document.createElement('script')
+    script.async = true
+    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
+    script.dataset.ocrRuntime = 'tesseract'
+    script.addEventListener('load', () => resolve(), { once: true })
+    script.addEventListener('error', () => reject(new Error('Unable to load OCR runtime.')), { once: true })
+    document.head.appendChild(script)
+  })
+
+  if (!window.Tesseract) {
+    throw new Error('OCR runtime unavailable.')
+  }
+
+  return window.Tesseract
+}
+
 interface ProjectDraft {
   manufacturingCode: string
   pieceName: string
@@ -69,19 +122,34 @@ interface ProjectDraft {
   totalCost: string
   metalPlating: string
   usageNotes: string
+  photosText: string
+  gemstones: ManufacturingGemstoneUpsertRequest[]
+  customFields: Record<string, string>
 }
 
-const EMPTY_DRAFT: ProjectDraft = {
-  manufacturingCode: '',
-  pieceName: '',
-  pieceType: 'necklace',
-  status: 'approved',
-  designerName: '',
-  craftsmanName: '',
-  sellingPrice: '0',
-  totalCost: '0',
-  metalPlating: '',
-  usageNotes: ''
+function buildDraft(defaultStatus: string, fields: ManufacturingCustomField[]): ProjectDraft {
+  const customFields: Record<string, string> = {}
+  for (const field of fields) {
+    if (!field.isSystem && field.isActive) {
+      customFields[field.fieldKey] = ''
+    }
+  }
+
+  return {
+    manufacturingCode: '',
+    pieceName: '',
+    pieceType: 'necklace',
+    status: defaultStatus,
+    designerName: '',
+    craftsmanName: '',
+    sellingPrice: '0',
+    totalCost: '0',
+    metalPlating: '',
+    usageNotes: '',
+    photosText: '',
+    gemstones: [],
+    customFields
+  }
 }
 
 export function ManufacturingPanel() {
@@ -92,12 +160,87 @@ export function ManufacturingPanel() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const [settings, setSettings] = useState<ManufacturingSettings | null>(null)
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true)
+
   const [selected, setSelected] = useState<ManufacturingProjectDetail | null>(null)
   const [selectedStatus, setSelectedStatus] = useState('')
 
-  const [isCreating, setIsCreating] = useState(false)
-  const [draft, setDraft] = useState<ProjectDraft>(EMPTY_DRAFT)
+  const [view, setView] = useState<'list' | 'create'>('list')
+  const [createMode, setCreateMode] = useState<'upload' | 'manual'>('upload')
+  const [draft, setDraft] = useState<ProjectDraft>(() => buildDraft('approved', []))
   const [isSaving, setIsSaving] = useState(false)
+
+  const [noteFile, setNoteFile] = useState<File | null>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+
+  const statusOptions = useMemo(() => {
+    if (!settings) {
+      return ['approved', 'sent_to_craftsman', 'internal_setting_qc', 'diamond_sorting', 'stone_setting', 'plating', 'final_piece_qc', 'complete_piece', 'ready_for_sale', 'sold']
+    }
+
+    return settings.steps
+      .filter(step => step.isActive)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map(step => step.stepKey)
+  }, [settings])
+
+  const activeFields = useMemo(() => {
+    if (!settings) {
+      return [
+        {
+          fieldKey: 'designerName',
+          label: 'Designer',
+          fieldType: 'text',
+          sortOrder: 1,
+          isRequired: false,
+          isActive: true,
+          isSystem: true,
+          options: []
+        },
+        {
+          fieldKey: 'craftsmanName',
+          label: 'Craftsman',
+          fieldType: 'text',
+          sortOrder: 2,
+          isRequired: false,
+          isActive: true,
+          isSystem: true,
+          options: []
+        }
+      ] satisfies ManufacturingCustomField[]
+    }
+
+    return settings.fields
+      .filter(field => field.isActive)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+  }, [settings])
+
+  const defaultStatus = statusOptions[0] ?? 'approved'
+
+  const stepRequirementsByStatus = useMemo(() => {
+    const requirements: Record<string, { requirePhoto: boolean, requireComment: boolean }> = {}
+    if (!settings) {
+      return requirements
+    }
+
+    for (const step of settings.steps) {
+      requirements[step.stepKey] = {
+        requirePhoto: step.requirePhoto,
+        requireComment: step.requireComment
+      }
+    }
+
+    return requirements
+  }, [settings])
+
+  const customFieldLabels = useMemo(() => {
+    const labels: Record<string, string> = {}
+    for (const field of activeFields) {
+      labels[field.fieldKey] = field.label
+    }
+    return labels
+  }, [activeFields])
 
   async function loadRecords(currentSearch: string, currentStatus: string) {
     setIsLoading(true)
@@ -119,9 +262,31 @@ export function ManufacturingPanel() {
     }
   }
 
+  async function loadSettings() {
+    setIsLoadingSettings(true)
+    try {
+      const loaded = await getManufacturingSettings()
+      setSettings(loaded)
+    } catch {
+      setError('Unable to load manufacturing settings.')
+    } finally {
+      setIsLoadingSettings(false)
+    }
+  }
+
   useEffect(() => {
     void loadRecords(search, statusFilter)
   }, [search, statusFilter])
+
+  useEffect(() => {
+    void loadSettings()
+  }, [])
+
+  useEffect(() => {
+    if (view === 'create') {
+      setDraft(buildDraft(defaultStatus, activeFields))
+    }
+  }, [defaultStatus, activeFields, view])
 
   async function openDetail(projectId: number) {
     setError(null)
@@ -134,9 +299,85 @@ export function ManufacturingPanel() {
     }
   }
 
+  async function analyzeNote() {
+    if (!noteFile) {
+      setError('Choose a note photo before analysis.')
+      return
+    }
+
+    setIsAnalyzing(true)
+    setError(null)
+
+    try {
+      const ocrRuntime = await ensureOcrRuntime()
+      const worker = await ocrRuntime.createWorker('eng')
+      const result = await worker.recognize(noteFile)
+      await worker.terminate()
+
+      const noteText = result.data?.text ?? ''
+      const parsed = await parseManufacturingNote(noteText)
+      setDraft(current => ({
+        ...current,
+        manufacturingCode: parsed.manufacturingCode ?? current.manufacturingCode,
+        pieceName: parsed.pieceName ?? current.pieceName,
+        pieceType: parsed.pieceType ?? current.pieceType,
+        status: statusOptions.includes(parsed.status) ? parsed.status : current.status,
+        designerName: parsed.designerName ?? current.designerName,
+        craftsmanName: parsed.craftsmanName ?? current.craftsmanName,
+        usageNotes: parsed.usageNotes ?? current.usageNotes,
+        totalCost: parsed.totalCost != null ? String(parsed.totalCost) : current.totalCost,
+        sellingPrice: parsed.sellingPrice != null ? String(parsed.sellingPrice) : current.sellingPrice,
+        photosText: current.photosText || `uploaded-note:${noteFile.name}`,
+        gemstones: parsed.gemstones,
+        customFields: {
+          ...current.customFields,
+          ...Object.fromEntries(Object.entries(parsed.customFields).map(([key, value]) => [key, value ?? '']))
+        }
+      }))
+      setCreateMode('manual')
+    } catch {
+      setError('Unable to analyze note photo. You can continue with manual entry.')
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
   async function handleCreate() {
     if (!draft.manufacturingCode.trim() || !draft.pieceName.trim()) {
       setError('Manufacturing code and piece name are required.')
+      return
+    }
+
+    for (const field of activeFields) {
+      if (!field.isRequired) {
+        continue
+      }
+
+      if (field.fieldKey === 'designerName' && !draft.designerName.trim()) {
+        setError('Designer is required by current settings.')
+        return
+      }
+
+      if (field.fieldKey === 'craftsmanName' && !draft.craftsmanName.trim()) {
+        setError('Craftsman is required by current settings.')
+        return
+      }
+
+      if (!field.isSystem && !draft.customFields[field.fieldKey]?.trim()) {
+        setError(`${field.label} is required.`)
+        return
+      }
+    }
+
+    const photos = parsePhotos(draft.photosText)
+    const selectedStepRequirements = stepRequirementsByStatus[draft.status]
+    if (selectedStepRequirements?.requirePhoto && photos.length === 0) {
+      setError(`Photo upload is required for ${labelize(draft.status)}.`)
+      return
+    }
+
+    if (selectedStepRequirements?.requireComment && !draft.usageNotes.trim()) {
+      setError(`A comment is required for ${labelize(draft.status)}.`)
       return
     }
 
@@ -144,6 +385,11 @@ export function ManufacturingPanel() {
     setError(null)
 
     try {
+      const payloadCustomFields: Record<string, string | null> = {}
+      for (const [key, value] of Object.entries(draft.customFields)) {
+        payloadCustomFields[key] = value.trim() || null
+      }
+
       const created = await createManufacturingProject({
         manufacturingCode: draft.manufacturingCode.trim(),
         pieceName: draft.pieceName.trim(),
@@ -158,11 +404,15 @@ export function ManufacturingPanel() {
           .map(item => item.trim())
           .filter(item => item.length > 0),
         usageNotes: draft.usageNotes.trim() || null,
-        gemstones: []
+        photos,
+        gemstones: draft.gemstones,
+        customFields: payloadCustomFields
       })
 
-      setDraft(EMPTY_DRAFT)
-      setIsCreating(false)
+      setView('list')
+      setCreateMode('upload')
+      setNoteFile(null)
+      setDraft(buildDraft(defaultStatus, activeFields))
       await loadRecords(search, statusFilter)
       setSelected(created)
       setSelectedStatus(created.status)
@@ -196,37 +446,64 @@ export function ManufacturingPanel() {
     }
   }
 
-  return (
-    <>
-      <section className="content-card">
+  if (view === 'create') {
+    return (
+      <section className="content-card content-card-full">
         <div className="card-head">
           <div>
-            <h3>Manufacturing Records</h3>
-            <p>{totalCount.toLocaleString()} projects across production workflow stages</p>
+            <h3>New Manufacturing Project</h3>
+            <p>Upload a handwritten note first, or switch to manual entry.</p>
           </div>
-          <button type="button" className="primary-btn" onClick={() => setIsCreating(current => !current)}>
-            {isCreating ? 'Cancel' : 'New Project'}
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={() => {
+              setView('list')
+              setCreateMode('upload')
+              setNoteFile(null)
+            }}
+          >
+            Back To Records
           </button>
         </div>
 
         {error ? <p className="error-banner">{error}</p> : null}
 
-        <div className="filter-grid">
-          <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search code, piece, designer, craftsman" />
-          <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
-            <option value="all">All statuses</option>
-            <option value="in_production">In production</option>
-            {STATUS_OPTIONS.map(status => (
-              <option key={status} value={status}>
-                {labelize(status)}
-              </option>
-            ))}
-          </select>
-          <div />
+        <div className="auth-mode-row" style={{ maxWidth: 420 }}>
+          <button type="button" className={createMode === 'upload' ? 'active' : ''} onClick={() => setCreateMode('upload')}>
+            Upload Note
+          </button>
+          <button type="button" className={createMode === 'manual' ? 'active' : ''} onClick={() => setCreateMode('manual')}>
+            Fill In Manually
+          </button>
         </div>
 
-        {isCreating ? (
-          <div className="crm-form-grid">
+        {createMode === 'upload' ? (
+          <div className="crm-form-grid" style={{ marginTop: '0.8rem' }}>
+            <label className="crm-form-span">
+              Upload Note Photo
+              <input
+                type="file"
+                accept="image/*"
+                onChange={event => setNoteFile(event.target.files?.[0] ?? null)}
+              />
+            </label>
+            <div className="crm-form-actions crm-form-span">
+              <button type="button" className="primary-btn" onClick={() => void analyzeNote()} disabled={isAnalyzing || !noteFile}>
+                {isAnalyzing ? 'Analyzing...' : 'Analyze And Fill Form'}
+              </button>
+              <button type="button" className="secondary-btn" onClick={() => setCreateMode('manual')}>
+                Fill In Manually
+              </button>
+            </div>
+            <p className="panel-placeholder crm-form-span">
+              The AI intake agent reads your uploaded note and prefills the project form for review.
+            </p>
+          </div>
+        ) : null}
+
+        {createMode === 'manual' ? (
+          <div className="crm-form-grid" style={{ marginTop: '0.8rem' }}>
             <label>
               Manufacturing Code
               <input value={draft.manufacturingCode} onChange={event => setDraft(current => ({ ...current, manufacturingCode: event.target.value }))} />
@@ -246,19 +523,107 @@ export function ManufacturingPanel() {
             <label>
               Status
               <select value={draft.status} onChange={event => setDraft(current => ({ ...current, status: event.target.value }))}>
-                {STATUS_OPTIONS.map(status => (
+                {statusOptions.map(status => (
                   <option key={status} value={status}>{labelize(status)}</option>
                 ))}
               </select>
             </label>
-            <label>
-              Designer
-              <input value={draft.designerName} onChange={event => setDraft(current => ({ ...current, designerName: event.target.value }))} />
-            </label>
-            <label>
-              Craftsman
-              <input value={draft.craftsmanName} onChange={event => setDraft(current => ({ ...current, craftsmanName: event.target.value }))} />
-            </label>
+
+            {(stepRequirementsByStatus[draft.status]?.requirePhoto || stepRequirementsByStatus[draft.status]?.requireComment) ? (
+              <p className="panel-placeholder crm-form-span">
+                Step requirements:
+                {' '}
+                {stepRequirementsByStatus[draft.status]?.requirePhoto ? 'photo required' : 'photo optional'}
+                {' • '}
+                {stepRequirementsByStatus[draft.status]?.requireComment ? 'comment required' : 'comment optional'}
+              </p>
+            ) : null}
+
+            {activeFields.map(field => {
+              if (field.fieldKey === 'designerName') {
+                return (
+                  <label key={field.fieldKey}>
+                    {field.label}
+                    <input
+                      value={draft.designerName}
+                      onChange={event => setDraft(current => ({ ...current, designerName: event.target.value }))}
+                      required={field.isRequired}
+                    />
+                  </label>
+                )
+              }
+
+              if (field.fieldKey === 'craftsmanName') {
+                return (
+                  <label key={field.fieldKey}>
+                    {field.label}
+                    <input
+                      value={draft.craftsmanName}
+                      onChange={event => setDraft(current => ({ ...current, craftsmanName: event.target.value }))}
+                      required={field.isRequired}
+                    />
+                  </label>
+                )
+              }
+
+              const fieldValue = draft.customFields[field.fieldKey] ?? ''
+              return (
+                <label key={field.fieldKey}>
+                  {field.label}
+                  {field.fieldType === 'textarea' ? (
+                    <textarea
+                      rows={2}
+                      value={fieldValue}
+                      onChange={event => {
+                        const value = event.target.value
+                        setDraft(current => ({
+                          ...current,
+                          customFields: {
+                            ...current.customFields,
+                            [field.fieldKey]: value
+                          }
+                        }))
+                      }}
+                    />
+                  ) : field.fieldType === 'select' ? (
+                    <select
+                      value={fieldValue}
+                      onChange={event => {
+                        const value = event.target.value
+                        setDraft(current => ({
+                          ...current,
+                          customFields: {
+                            ...current.customFields,
+                            [field.fieldKey]: value
+                          }
+                        }))
+                      }}
+                    >
+                      <option value="">Select</option>
+                      {field.options.map(option => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={field.fieldType === 'number' ? 'number' : field.fieldType === 'date' ? 'date' : 'text'}
+                      value={fieldValue}
+                      onChange={event => {
+                        const value = event.target.value
+                        setDraft(current => ({
+                          ...current,
+                          customFields: {
+                            ...current.customFields,
+                            [field.fieldKey]: value
+                          }
+                        }))
+                      }}
+                    />
+                  )}
+                </label>
+              )
+            })}
+
             <label>
               Selling Price (THB)
               <input type="number" value={draft.sellingPrice} onChange={event => setDraft(current => ({ ...current, sellingPrice: event.target.value }))} />
@@ -272,17 +637,80 @@ export function ManufacturingPanel() {
               <input value={draft.metalPlating} onChange={event => setDraft(current => ({ ...current, metalPlating: event.target.value }))} placeholder="white_gold, rose_gold" />
             </label>
             <label className="crm-form-span">
-              Notes
-              <textarea rows={3} value={draft.usageNotes} onChange={event => setDraft(current => ({ ...current, usageNotes: event.target.value }))} />
+              Photos (URL or identifier, comma/new line separated)
+              <textarea rows={2} value={draft.photosText} onChange={event => setDraft(current => ({ ...current, photosText: event.target.value }))} />
             </label>
+            <label className="crm-form-span">
+              Notes
+              <textarea rows={4} value={draft.usageNotes} onChange={event => setDraft(current => ({ ...current, usageNotes: event.target.value }))} />
+            </label>
+
+            {draft.gemstones.length > 0 ? (
+              <div className="crm-form-span usage-lines">
+                <h4>Parsed Gemstones ({draft.gemstones.length})</h4>
+                <div className="activity-list">
+                  {draft.gemstones.map((gem, index) => (
+                    <article key={`${gem.gemstoneCode ?? 'gem'}-${index}`}>
+                      <p><strong>{gem.gemstoneCode ?? '-'}</strong> • {gem.gemstoneType ?? '-'}</p>
+                      <p>{gem.piecesUsed ?? 0} pcs / {gem.weightUsedCt ?? 0} ct • {formatCurrency(gem.lineCost ?? 0)}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="crm-form-actions crm-form-span">
-              <button type="button" className="secondary-btn" onClick={() => setDraft(EMPTY_DRAFT)} disabled={isSaving}>Reset</button>
-              <button type="button" className="primary-btn" onClick={() => void handleCreate()} disabled={isSaving}>
+              <button type="button" className="secondary-btn" onClick={() => setCreateMode('upload')}>
+                Upload Note
+              </button>
+              <button type="button" className="secondary-btn" onClick={() => setDraft(buildDraft(defaultStatus, activeFields))} disabled={isSaving}>
+                Reset
+              </button>
+              <button type="button" className="primary-btn" onClick={() => void handleCreate()} disabled={isSaving || isLoadingSettings}>
                 {isSaving ? 'Saving...' : 'Save Project'}
               </button>
             </div>
           </div>
         ) : null}
+      </section>
+    )
+  }
+
+  return (
+    <>
+      <section className="content-card">
+        <div className="card-head">
+          <div>
+            <h3>Manufacturing Records</h3>
+            <p>{totalCount.toLocaleString()} projects across production workflow stages</p>
+          </div>
+          <button
+            type="button"
+            className="primary-btn"
+            onClick={() => {
+              setView('create')
+              setCreateMode('upload')
+              setNoteFile(null)
+            }}
+          >
+            New Project
+          </button>
+        </div>
+
+        {error ? <p className="error-banner">{error}</p> : null}
+
+        <div className="filter-grid">
+          <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search code, piece, designer, craftsman" />
+          <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+            <option value="all">All statuses</option>
+            {statusOptions.map(status => (
+              <option key={status} value={status}>
+                {labelize(status)}
+              </option>
+            ))}
+          </select>
+          <div />
+        </div>
 
         {isLoading ? (
           <p className="panel-placeholder">Loading manufacturing projects...</p>
@@ -347,9 +775,23 @@ export function ManufacturingPanel() {
               <p><strong>Updated:</strong> {formatDate(selected.updatedAtUtc)}</p>
             </div>
 
+            {Object.keys(selected.customFields).length > 0 ? (
+              <div className="usage-lines">
+                <h4>Custom Fields</h4>
+                <div className="activity-list">
+                  {Object.entries(selected.customFields).map(([key, value]) => (
+                    <article key={key}>
+                      <p><strong>{customFieldLabels[key] ?? labelize(key)}</strong></p>
+                      <p>{value ?? '-'}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="status-update-row">
               <select value={selectedStatus} onChange={event => setSelectedStatus(event.target.value)}>
-                {STATUS_OPTIONS.map(status => (
+                {statusOptions.map(status => (
                   <option key={status} value={status}>{labelize(status)}</option>
                 ))}
               </select>
@@ -357,6 +799,17 @@ export function ManufacturingPanel() {
                 {isSaving ? 'Updating...' : 'Update Status'}
               </button>
             </div>
+            {(stepRequirementsByStatus[selectedStatus]?.requirePhoto || stepRequirementsByStatus[selectedStatus]?.requireComment) ? (
+              <p className="panel-placeholder">
+                {labelize(selectedStatus)}
+                {' '}
+                requires:
+                {' '}
+                {stepRequirementsByStatus[selectedStatus]?.requirePhoto ? 'photo' : 'no photo'}
+                {' / '}
+                {stepRequirementsByStatus[selectedStatus]?.requireComment ? 'comment' : 'no comment'}
+              </p>
+            ) : null}
 
             {selected.usageNotes ? (
               <div className="usage-lines">

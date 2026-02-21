@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { SessionProvider } from './app/SessionContext'
 import { useSession } from './app/useSession'
 import { DashboardPage } from './pages/DashboardPage'
+import { AcceptInvitePage } from './pages/AcceptInvitePage'
 import { LoginPage } from './pages/LoginPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 
@@ -31,6 +32,7 @@ function PublicRoutes() {
   return (
     <Routes>
       <Route path="/" element={<LoginPage />} />
+      <Route path="/accept-invite" element={<AcceptInvitePage />} />
       <Route path="*" element={<Navigate replace to="/" />} />
     </Routes>
   )

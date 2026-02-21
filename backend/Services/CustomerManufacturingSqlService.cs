@@ -32,6 +32,10 @@ public interface ICustomerManufacturingSqlService
         ManufacturingProjectUpsertRequest request,
         CancellationToken cancellationToken = default);
     Task<bool> DeleteManufacturingProjectAsync(int projectId, CancellationToken cancellationToken = default);
+    Task<ManufacturingSettingsResponse> GetManufacturingSettingsAsync(CancellationToken cancellationToken = default);
+    Task<ManufacturingSettingsResponse> SaveManufacturingSettingsAsync(
+        ManufacturingSettingsUpdateRequest request,
+        CancellationToken cancellationToken = default);
 
     Task<AnalyticsOverviewResponse> GetAnalyticsAsync(CancellationToken cancellationToken = default);
 }
@@ -388,6 +392,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 mp.sold_at,
                 mp.created_at_utc,
                 mp.updated_at_utc,
+                mp.custom_fields_json,
                 c.name AS customer_name,
                 (
                     SELECT COUNT(*)
@@ -457,6 +462,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 mp.sold_at,
                 mp.created_at_utc,
                 mp.updated_at_utc,
+                mp.custom_fields_json,
                 c.name AS customer_name
             FROM dbo.manufacturing_projects mp
             LEFT JOIN dbo.customers c
@@ -575,6 +581,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             UpdatedAtUtc = detail.UpdatedAtUtc,
             Gemstones = gemstones,
             ActivityLog = activity,
+            CustomFields = detail.CustomFields,
         };
     }
 
@@ -606,6 +613,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 completion_date,
                 usage_notes,
                 photos_json,
+                custom_fields_json,
                 customer_id,
                 sold_at,
                 updated_at_utc
@@ -629,6 +637,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 @CompletionDate,
                 @UsageNotes,
                 @PhotosJson,
+                @CustomFieldsJson,
                 @CustomerId,
                 @SoldAt,
                 SYSUTCDATETIME()
@@ -642,6 +651,15 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
 
         try
         {
+            var createStepRequirement = await GetStepRequirementAsync(conn, tx, status, cancellationToken);
+            EnsureStepRequirements(
+                status,
+                createStepRequirement.RequirePhoto,
+                createStepRequirement.RequireComment,
+                request.Photos,
+                request.UsageNotes,
+                request.ActivityNote);
+
             int createdId;
             await using (var insertCmd = new SqlCommand(insertSql, conn, tx))
             {
@@ -662,6 +680,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 insertCmd.Parameters.AddWithValue("@CompletionDate", DbValue(request.CompletionDate));
                 insertCmd.Parameters.AddWithValue("@UsageNotes", DbNullIfEmpty(request.UsageNotes));
                 insertCmd.Parameters.AddWithValue("@PhotosJson", SerializeJsonArray(request.Photos));
+                insertCmd.Parameters.AddWithValue("@CustomFieldsJson", SerializeJsonDictionary(request.CustomFields));
                 insertCmd.Parameters.AddWithValue("@CustomerId", DbValue(request.CustomerId));
                 insertCmd.Parameters.AddWithValue("@SoldAt", DbValue(request.SoldAt));
 
@@ -751,6 +770,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 completion_date = @CompletionDate,
                 usage_notes = @UsageNotes,
                 photos_json = @PhotosJson,
+                custom_fields_json = @CustomFieldsJson,
                 customer_id = @CustomerId,
                 sold_at = @SoldAt,
                 updated_at_utc = SYSUTCDATETIME()
@@ -764,6 +784,17 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
 
         try
         {
+            var photos = request.Photos ?? existing.Photos;
+            var usageNotes = request.UsageNotes ?? existing.UsageNotes;
+            var updateStepRequirement = await GetStepRequirementAsync(conn, tx, status, cancellationToken);
+            EnsureStepRequirements(
+                status,
+                updateStepRequirement.RequirePhoto,
+                updateStepRequirement.RequireComment,
+                photos,
+                usageNotes,
+                request.ActivityNote);
+
             await using (var updateCmd = new SqlCommand(updateSql, conn, tx))
             {
                 updateCmd.Parameters.AddWithValue("@ProjectId", projectId);
@@ -784,6 +815,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 updateCmd.Parameters.AddWithValue("@CompletionDate", DbValue(completionDate));
                 updateCmd.Parameters.AddWithValue("@UsageNotes", request.UsageNotes is null ? DbNullIfEmpty(existing.UsageNotes) : DbNullIfEmpty(request.UsageNotes));
                 updateCmd.Parameters.AddWithValue("@PhotosJson", SerializeJsonArray(request.Photos ?? existing.Photos));
+                updateCmd.Parameters.AddWithValue("@CustomFieldsJson", SerializeJsonDictionary(request.CustomFields ?? existing.CustomFields));
                 updateCmd.Parameters.AddWithValue("@CustomerId", DbValue(customerId));
                 updateCmd.Parameters.AddWithValue("@SoldAt", DbValue(soldAt));
 
@@ -839,6 +871,265 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
 
         var rows = await cmd.ExecuteNonQueryAsync(cancellationToken);
         return rows > 0;
+    }
+
+    public async Task<ManufacturingSettingsResponse> GetManufacturingSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        const string stepsSql = """
+            SELECT
+                step_key,
+                label,
+                sort_order,
+                require_photo,
+                require_comment,
+                is_active
+            FROM dbo.manufacturing_process_steps
+            ORDER BY sort_order, id;
+            """;
+
+        const string fieldsSql = """
+            SELECT
+                field_key,
+                label,
+                field_type,
+                sort_order,
+                is_required,
+                is_active,
+                is_system,
+                options_json
+            FROM dbo.manufacturing_custom_fields
+            ORDER BY sort_order, id;
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_process_steps", cancellationToken) ||
+            !await TableExistsAsync(conn, "dbo.manufacturing_custom_fields", cancellationToken))
+        {
+            return BuildDefaultSettings();
+        }
+
+        var steps = new List<ManufacturingProcessStepResponse>();
+        await using (var stepsCmd = new SqlCommand(stepsSql, conn))
+        {
+            await using var reader = await stepsCmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                steps.Add(new ManufacturingProcessStepResponse
+                {
+                    StepKey = GetString(reader, "step_key"),
+                    Label = GetString(reader, "label"),
+                    SortOrder = GetInt32(reader, "sort_order"),
+                    RequirePhoto = GetBoolean(reader, "require_photo"),
+                    RequireComment = GetBoolean(reader, "require_comment"),
+                    IsActive = GetBoolean(reader, "is_active")
+                });
+            }
+        }
+
+        var fields = new List<ManufacturingCustomFieldResponse>();
+        await using (var fieldsCmd = new SqlCommand(fieldsSql, conn))
+        {
+            await using var reader = await fieldsCmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                fields.Add(new ManufacturingCustomFieldResponse
+                {
+                    FieldKey = GetString(reader, "field_key"),
+                    Label = GetString(reader, "label"),
+                    FieldType = NormalizeFieldType(GetNullableString(reader, "field_type")),
+                    SortOrder = GetInt32(reader, "sort_order"),
+                    IsRequired = GetBoolean(reader, "is_required"),
+                    IsActive = GetBoolean(reader, "is_active"),
+                    IsSystem = GetBoolean(reader, "is_system"),
+                    Options = DeserializeJsonArray(GetNullableString(reader, "options_json"))
+                });
+            }
+        }
+
+        if (steps.Count == 0 && fields.Count == 0)
+        {
+            return BuildDefaultSettings();
+        }
+
+        return new ManufacturingSettingsResponse
+        {
+            Steps = steps,
+            Fields = fields
+        };
+    }
+
+    public async Task<ManufacturingSettingsResponse> SaveManufacturingSettingsAsync(
+        ManufacturingSettingsUpdateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedSteps = (request.Steps ?? [])
+            .Select((item, index) =>
+            {
+                var stepKey = NormalizeStepKey(item.StepKey);
+                if (string.IsNullOrWhiteSpace(stepKey))
+                {
+                    return null;
+                }
+
+                var label = string.IsNullOrWhiteSpace(item.Label) ? stepKey : item.Label.Trim();
+                return new ManufacturingProcessStepResponse
+                {
+                    StepKey = stepKey,
+                    Label = label,
+                    SortOrder = item.SortOrder ?? (index + 1),
+                    RequirePhoto = item.RequirePhoto,
+                    RequireComment = item.RequireComment,
+                    IsActive = item.IsActive
+                };
+            })
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .GroupBy(item => item.StepKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.StepKey, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (normalizedSteps.Count == 0)
+        {
+            throw new ArgumentException("At least one production step is required.");
+        }
+
+        var normalizedFields = (request.Fields ?? [])
+            .Select((item, index) =>
+            {
+                var fieldKey = NormalizeFieldKey(item.FieldKey);
+                if (string.IsNullOrWhiteSpace(fieldKey))
+                {
+                    return null;
+                }
+
+                var label = string.IsNullOrWhiteSpace(item.Label) ? fieldKey : item.Label.Trim();
+                var isSystem = IsSystemField(fieldKey);
+                return new ManufacturingCustomFieldResponse
+                {
+                    FieldKey = fieldKey,
+                    Label = label,
+                    FieldType = NormalizeFieldType(item.FieldType),
+                    SortOrder = item.SortOrder ?? (index + 1),
+                    IsRequired = item.IsRequired,
+                    IsActive = item.IsActive,
+                    IsSystem = isSystem,
+                    Options = (item.Options ?? [])
+                        .Where(value => !string.IsNullOrWhiteSpace(value))
+                        .Select(value => value.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList()
+                };
+            })
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .GroupBy(item => item.FieldKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.FieldKey, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+        await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            const string deleteStepsSql = "DELETE FROM dbo.manufacturing_process_steps;";
+            await using (var deleteStepsCmd = new SqlCommand(deleteStepsSql, conn, tx))
+            {
+                await deleteStepsCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            const string insertStepSql = """
+                INSERT INTO dbo.manufacturing_process_steps (
+                    step_key,
+                    label,
+                    sort_order,
+                    require_photo,
+                    require_comment,
+                    is_active,
+                    updated_at_utc
+                )
+                VALUES (
+                    @StepKey,
+                    @Label,
+                    @SortOrder,
+                    @RequirePhoto,
+                    @RequireComment,
+                    @IsActive,
+                    SYSUTCDATETIME()
+                );
+                """;
+
+            foreach (var step in normalizedSteps)
+            {
+                await using var insertStepCmd = new SqlCommand(insertStepSql, conn, tx);
+                insertStepCmd.Parameters.AddWithValue("@StepKey", step.StepKey);
+                insertStepCmd.Parameters.AddWithValue("@Label", step.Label);
+                insertStepCmd.Parameters.AddWithValue("@SortOrder", step.SortOrder);
+                insertStepCmd.Parameters.AddWithValue("@RequirePhoto", step.RequirePhoto);
+                insertStepCmd.Parameters.AddWithValue("@RequireComment", step.RequireComment);
+                insertStepCmd.Parameters.AddWithValue("@IsActive", step.IsActive);
+                await insertStepCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            const string deleteFieldsSql = "DELETE FROM dbo.manufacturing_custom_fields;";
+            await using (var deleteFieldsCmd = new SqlCommand(deleteFieldsSql, conn, tx))
+            {
+                await deleteFieldsCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            const string insertFieldSql = """
+                INSERT INTO dbo.manufacturing_custom_fields (
+                    field_key,
+                    label,
+                    field_type,
+                    sort_order,
+                    is_required,
+                    is_active,
+                    is_system,
+                    options_json,
+                    updated_at_utc
+                )
+                VALUES (
+                    @FieldKey,
+                    @Label,
+                    @FieldType,
+                    @SortOrder,
+                    @IsRequired,
+                    @IsActive,
+                    @IsSystem,
+                    @OptionsJson,
+                    SYSUTCDATETIME()
+                );
+                """;
+
+            foreach (var field in normalizedFields)
+            {
+                await using var insertFieldCmd = new SqlCommand(insertFieldSql, conn, tx);
+                insertFieldCmd.Parameters.AddWithValue("@FieldKey", field.FieldKey);
+                insertFieldCmd.Parameters.AddWithValue("@Label", field.Label);
+                insertFieldCmd.Parameters.AddWithValue("@FieldType", field.FieldType);
+                insertFieldCmd.Parameters.AddWithValue("@SortOrder", field.SortOrder);
+                insertFieldCmd.Parameters.AddWithValue("@IsRequired", field.IsRequired);
+                insertFieldCmd.Parameters.AddWithValue("@IsActive", field.IsActive);
+                insertFieldCmd.Parameters.AddWithValue("@IsSystem", field.IsSystem);
+                insertFieldCmd.Parameters.AddWithValue("@OptionsJson", SerializeJsonArray(field.Options));
+                await insertFieldCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            await tx.CommitAsync(cancellationToken);
+            return await GetManufacturingSettingsAsync(cancellationToken);
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            throw;
+        }
     }
 
     public async Task<AnalyticsOverviewResponse> GetAnalyticsAsync(CancellationToken cancellationToken = default)
@@ -1049,6 +1340,164 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         }
     }
 
+    private async Task<(bool RequirePhoto, bool RequireComment)> GetStepRequirementAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string status,
+        CancellationToken cancellationToken)
+    {
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_process_steps", cancellationToken, tx))
+        {
+            return (false, false);
+        }
+
+        const string sql = """
+            SELECT TOP 1
+                require_photo,
+                require_comment
+            FROM dbo.manufacturing_process_steps
+            WHERE step_key = @StepKey
+            ORDER BY sort_order, id;
+            """;
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@StepKey", ManufacturingStatuses.NormalizeOrDefault(status));
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return (false, false);
+        }
+
+        return (GetBoolean(reader, "require_photo"), GetBoolean(reader, "require_comment"));
+    }
+
+    private static void EnsureStepRequirements(
+        string status,
+        bool requirePhoto,
+        bool requireComment,
+        IReadOnlyList<string>? photos,
+        string? usageNotes,
+        string? activityNote)
+    {
+        if (requirePhoto && (photos is null || !photos.Any(photo => !string.IsNullOrWhiteSpace(photo))))
+        {
+            throw new ArgumentException($"Status '{status}' requires at least one photo.");
+        }
+
+        if (requireComment && string.IsNullOrWhiteSpace(usageNotes) && string.IsNullOrWhiteSpace(activityNote))
+        {
+            throw new ArgumentException($"Status '{status}' requires a comment or note.");
+        }
+    }
+
+    private static bool IsSystemField(string key)
+    {
+        return string.Equals(key, "designerName", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(key, "craftsmanName", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeStepKey(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return string.Empty;
+        }
+
+        var cleaned = raw.Trim().Replace('-', '_').Replace(' ', '_');
+        return string.Concat(cleaned.Where(ch => char.IsLetterOrDigit(ch) || ch == '_')).ToLowerInvariant();
+    }
+
+    private static string NormalizeFieldKey(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = raw.Trim();
+        if (IsSystemField(trimmed))
+        {
+            return trimmed;
+        }
+
+        var cleaned = trimmed.Replace('-', '_').Replace(' ', '_');
+        return string.Concat(cleaned.Where(ch => char.IsLetterOrDigit(ch) || ch == '_'));
+    }
+
+    private static string NormalizeFieldType(string? raw)
+    {
+        var value = string.IsNullOrWhiteSpace(raw) ? "text" : raw.Trim().ToLowerInvariant();
+        return value switch
+        {
+            "text" => "text",
+            "textarea" => "textarea",
+            "number" => "number",
+            "date" => "date",
+            "select" => "select",
+            _ => "text"
+        };
+    }
+
+    private static async Task<bool> TableExistsAsync(
+        SqlConnection conn,
+        string tableName,
+        CancellationToken cancellationToken,
+        SqlTransaction? tx = null)
+    {
+        const string sql = "SELECT CASE WHEN OBJECT_ID(@TableName, 'U') IS NULL THEN 0 ELSE 1 END;";
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@TableName", tableName);
+        var result = await cmd.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result ?? 0) == 1;
+    }
+
+    private static ManufacturingSettingsResponse BuildDefaultSettings()
+    {
+        var defaultSteps = ManufacturingStatuses.Defaults
+            .Select((value, index) => new ManufacturingProcessStepResponse
+            {
+                StepKey = value,
+                Label = value.Replace('_', ' '),
+                SortOrder = index + 1,
+                RequirePhoto = false,
+                RequireComment = false,
+                IsActive = true
+            })
+            .ToList();
+
+        var defaultFields = new List<ManufacturingCustomFieldResponse>
+        {
+            new()
+            {
+                FieldKey = "designerName",
+                Label = "Designer",
+                FieldType = "text",
+                SortOrder = 1,
+                IsRequired = false,
+                IsActive = true,
+                IsSystem = true,
+                Options = []
+            },
+            new()
+            {
+                FieldKey = "craftsmanName",
+                Label = "Craftsman",
+                FieldType = "text",
+                SortOrder = 2,
+                IsRequired = false,
+                IsActive = true,
+                IsSystem = true,
+                Options = []
+            }
+        };
+
+        return new ManufacturingSettingsResponse
+        {
+            Steps = defaultSteps,
+            Fields = defaultFields
+        };
+    }
+
     private static async Task ReplaceProjectGemstonesAsync(
         SqlConnection conn,
         SqlTransaction tx,
@@ -1186,6 +1635,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             CreatedAtUtc = GetDateTime(reader, "created_at_utc"),
             UpdatedAtUtc = GetDateTime(reader, "updated_at_utc"),
             GemstoneCount = GetInt32(reader, "gemstone_count"),
+            CustomFields = DeserializeJsonDictionary(GetNullableString(reader, "custom_fields_json")),
         };
     }
 
@@ -1216,6 +1666,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             SoldAt = GetNullableDateTime(reader, "sold_at"),
             CreatedAtUtc = GetDateTime(reader, "created_at_utc"),
             UpdatedAtUtc = GetDateTime(reader, "updated_at_utc"),
+            CustomFields = DeserializeJsonDictionary(GetNullableString(reader, "custom_fields_json")),
         };
     }
 
@@ -1226,6 +1677,18 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             .Select(value => value.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList() ?? [];
+
+        return JsonSerializer.Serialize(normalized);
+    }
+
+    private static string SerializeJsonDictionary(IReadOnlyDictionary<string, string?>? values)
+    {
+        var normalized = values?
+            .Where(item => !string.IsNullOrWhiteSpace(item.Key))
+            .ToDictionary(
+                item => item.Key.Trim(),
+                item => string.IsNullOrWhiteSpace(item.Value) ? null : item.Value.Trim(),
+                StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
         return JsonSerializer.Serialize(normalized);
     }
@@ -1248,6 +1711,29 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         catch
         {
             return [];
+        }
+    }
+
+    private static IReadOnlyDictionary<string, string?> DeserializeJsonDictionary(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return new Dictionary<string, string?>();
+        }
+
+        try
+        {
+            var values = JsonSerializer.Deserialize<Dictionary<string, string?>>(raw);
+            return values?
+                .Where(item => !string.IsNullOrWhiteSpace(item.Key))
+                .ToDictionary(
+                    item => item.Key.Trim(),
+                    item => string.IsNullOrWhiteSpace(item.Value) ? null : item.Value.Trim(),
+                    StringComparer.OrdinalIgnoreCase) ?? new Dictionary<string, string?>();
+        }
+        catch
+        {
+            return new Dictionary<string, string?>();
         }
     }
 
@@ -1309,6 +1795,17 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         }
 
         return Convert.ToInt32(reader.GetValue(ordinal));
+    }
+
+    private static bool GetBoolean(SqlDataReader reader, string columnName)
+    {
+        var ordinal = GetOrdinal(reader, columnName);
+        if (reader.IsDBNull(ordinal))
+        {
+            return false;
+        }
+
+        return Convert.ToBoolean(reader.GetValue(ordinal));
     }
 
     private static int? GetNullableInt32(SqlDataReader reader, string columnName)

@@ -426,6 +426,10 @@ a:focus-visible {
   box-shadow: var(--elev-1);
 }
 
+.content-card-full {
+  min-height: calc(100vh - 170px);
+}
+
 .card-head {
   display: flex;
   justify-content: space-between;
