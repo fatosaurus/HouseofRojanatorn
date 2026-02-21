@@ -16,7 +16,7 @@ function ProtectedRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Navigate replace to="/dashboard" />} />
-      <Route path="/dashboard" element={<DashboardPage />} />
+      <Route path="/dashboard/*" element={<DashboardPage />} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>
   )

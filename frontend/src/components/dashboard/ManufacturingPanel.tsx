@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   createManufacturingProject,
   getManufacturingProject,
@@ -56,7 +57,7 @@ function formatDate(raw: string | null | undefined): string {
 
 function parsePhotos(value: string): string[] {
   return value
-    .split(/[,\n]/)
+    .split(/[\n,]/)
     .map(item => item.trim())
     .filter(item => item.length > 0)
 }
@@ -152,12 +153,203 @@ function buildDraft(defaultStatus: string, fields: ManufacturingCustomField[]): 
   }
 }
 
+function parseManufacturingRoute(pathname: string): {
+  mode: 'list' | 'create' | 'detail'
+  detailId: number | null
+  isFull: boolean
+  isInvalid: boolean
+} {
+  const parts = pathname.split('/').filter(Boolean)
+  if (parts[0] !== 'dashboard' || parts[1] !== 'manufacturing') {
+    return { mode: 'list', detailId: null, isFull: false, isInvalid: false }
+  }
+
+  const segment = parts[2]
+  const fullSegment = parts[3]
+
+  if (!segment) {
+    return { mode: 'list', detailId: null, isFull: false, isInvalid: parts.length > 2 }
+  }
+
+  if (segment === 'new') {
+    return {
+      mode: 'create',
+      detailId: null,
+      isFull: false,
+      isInvalid: parts.length > 3
+    }
+  }
+
+  const detailId = Number(segment)
+  if (!Number.isInteger(detailId) || detailId <= 0) {
+    return { mode: 'list', detailId: null, isFull: false, isInvalid: true }
+  }
+
+  if (fullSegment && fullSegment !== 'full') {
+    return { mode: 'detail', detailId, isFull: false, isInvalid: true }
+  }
+
+  return {
+    mode: 'detail',
+    detailId,
+    isFull: fullSegment === 'full',
+    isInvalid: parts.length > 4
+  }
+}
+
+interface DetailContentProps {
+  selected: ManufacturingProjectDetail
+  selectedStatus: string
+  statusOptions: string[]
+  customFieldLabels: Record<string, string>
+  stepRequirementsByStatus: Record<string, { requirePhoto: boolean, requireComment: boolean }>
+  isSaving: boolean
+  onSelectedStatusChange: (value: string) => void
+  onUpdateStatus: () => void
+}
+
+function ManufacturingDetailContent({
+  selected,
+  selectedStatus,
+  statusOptions,
+  customFieldLabels,
+  stepRequirementsByStatus,
+  isSaving,
+  onSelectedStatusChange,
+  onUpdateStatus
+}: DetailContentProps) {
+  return (
+    <>
+      <div className="drawer-grid">
+        <p><strong>Type:</strong> {labelize(selected.pieceType)}</p>
+        <p><strong>Status:</strong> {labelize(selected.status)}</p>
+        <p><strong>Design Date:</strong> {formatDate(selected.designDate)}</p>
+        <p><strong>Completion Date:</strong> {formatDate(selected.completionDate)}</p>
+        <p><strong>Designer:</strong> {selected.designerName ?? '-'}</p>
+        <p><strong>Craftsman:</strong> {selected.craftsmanName ?? '-'}</p>
+        <p><strong>Metal Plating:</strong> {selected.metalPlating.length > 0 ? selected.metalPlating.map(value => labelize(value)).join(', ') : '-'}</p>
+        <p><strong>Plating Notes:</strong> {selected.metalPlatingNotes ?? '-'}</p>
+        <p><strong>Setting Cost:</strong> {formatCurrency(selected.settingCost)}</p>
+        <p><strong>Diamond Cost:</strong> {formatCurrency(selected.diamondCost)}</p>
+        <p><strong>Gemstone Cost:</strong> {formatCurrency(selected.gemstoneCost)}</p>
+        <p><strong>Selling Price:</strong> {formatCurrency(selected.sellingPrice)}</p>
+        <p><strong>Total Cost:</strong> {formatCurrency(selected.totalCost)}</p>
+        <p><strong>Customer:</strong> {selected.customerName ?? '-'}</p>
+        <p><strong>Sold At:</strong> {formatDate(selected.soldAt)}</p>
+        <p><strong>Created:</strong> {formatDate(selected.createdAtUtc)}</p>
+        <p><strong>Updated:</strong> {formatDate(selected.updatedAtUtc)}</p>
+      </div>
+
+      {Object.keys(selected.customFields).length > 0 ? (
+        <div className="usage-lines">
+          <h4>Custom Fields</h4>
+          <div className="activity-list">
+            {Object.entries(selected.customFields).map(([key, value]) => (
+              <article key={key}>
+                <p><strong>{customFieldLabels[key] ?? labelize(key)}</strong></p>
+                <p>{value ?? '-'}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="status-update-row">
+        <select value={selectedStatus} onChange={event => onSelectedStatusChange(event.target.value)}>
+          {statusOptions.map(status => (
+            <option key={status} value={status}>{labelize(status)}</option>
+          ))}
+        </select>
+        <button type="button" className="primary-btn" onClick={onUpdateStatus} disabled={isSaving || selectedStatus === selected.status}>
+          {isSaving ? 'Updating...' : 'Update Status'}
+        </button>
+      </div>
+      {(stepRequirementsByStatus[selectedStatus]?.requirePhoto || stepRequirementsByStatus[selectedStatus]?.requireComment) ? (
+        <p className="panel-placeholder">
+          {labelize(selectedStatus)} requires:
+          {' '}
+          {stepRequirementsByStatus[selectedStatus]?.requirePhoto ? 'photo' : 'no photo'}
+          {' / '}
+          {stepRequirementsByStatus[selectedStatus]?.requireComment ? 'comment' : 'no comment'}
+        </p>
+      ) : null}
+
+      {selected.usageNotes ? (
+        <div className="usage-lines">
+          <h4>Notes</h4>
+          <p>{selected.usageNotes}</p>
+        </div>
+      ) : null}
+
+      {selected.photos.length > 0 ? (
+        <div className="usage-lines">
+          <h4>Photos</h4>
+          <div className="activity-list">
+            {selected.photos.map((photo, index) => (
+              <article key={`${photo}-${index}`}>
+                <a href={photo} target="_blank" rel="noreferrer">{photo}</a>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="usage-lines">
+        <h4>Gemstones ({selected.gemstones.length})</h4>
+        {selected.gemstones.length === 0 ? (
+          <p className="panel-placeholder">No gemstones linked yet.</p>
+        ) : (
+          <div className="activity-list">
+            {selected.gemstones.map(gem => (
+              <article key={gem.id}>
+                <p>
+                  <strong>{gem.gemstoneCode ?? `#${gem.inventoryItemId ?? '?'}`}</strong>
+                  {' • '}
+                  {gem.gemstoneType ?? 'Unknown'}
+                </p>
+                <p>{gem.weightUsedCt} ct / {gem.piecesUsed} pcs</p>
+                <p>{formatCurrency(gem.lineCost)}</p>
+                {gem.notes ? <p>{gem.notes}</p> : null}
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="usage-lines">
+        <h4>Activity Log ({selected.activityLog.length})</h4>
+        {selected.activityLog.length === 0 ? (
+          <p className="panel-placeholder">No activity entries yet.</p>
+        ) : (
+          <div className="activity-list">
+            {selected.activityLog.map(entry => (
+              <article key={entry.id}>
+                <p>
+                  <strong>{labelize(entry.status)}</strong>
+                  {' • '}
+                  {formatDate(entry.activityAtUtc)}
+                </p>
+                {entry.notes ? <p>{entry.notes}</p> : null}
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
 export function ManufacturingPanel() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const route = useMemo(() => parseManufacturingRoute(location.pathname), [location.pathname])
+
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [records, setRecords] = useState<ManufacturingProjectSummary[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const [settings, setSettings] = useState<ManufacturingSettings | null>(null)
@@ -166,13 +358,18 @@ export function ManufacturingPanel() {
   const [selected, setSelected] = useState<ManufacturingProjectDetail | null>(null)
   const [selectedStatus, setSelectedStatus] = useState('')
 
-  const [view, setView] = useState<'list' | 'create'>('list')
   const [createMode, setCreateMode] = useState<'upload' | 'manual'>('upload')
   const [draft, setDraft] = useState<ProjectDraft>(() => buildDraft('approved', []))
   const [isSaving, setIsSaving] = useState(false)
 
   const [noteFile, setNoteFile] = useState<File | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+
+  useEffect(() => {
+    if (route.isInvalid) {
+      navigate('/dashboard/manufacturing', { replace: true })
+    }
+  }, [navigate, route.isInvalid])
 
   const statusOptions = useMemo(() => {
     if (!settings) {
@@ -283,21 +480,49 @@ export function ManufacturingPanel() {
   }, [])
 
   useEffect(() => {
-    if (view === 'create') {
+    if (route.mode === 'create') {
+      setCreateMode('upload')
+      setNoteFile(null)
       setDraft(buildDraft(defaultStatus, activeFields))
     }
-  }, [defaultStatus, activeFields, view])
+  }, [activeFields, defaultStatus, route.mode])
 
-  async function openDetail(projectId: number) {
-    setError(null)
-    try {
-      const detail = await getManufacturingProject(projectId)
-      setSelected(detail)
-      setSelectedStatus(detail.status)
-    } catch {
-      setError('Unable to load selected manufacturing project.')
+  useEffect(() => {
+    if (route.mode !== 'detail' || !route.detailId) {
+      setSelected(null)
+      setSelectedStatus('')
+      setIsLoadingDetail(false)
+      return
     }
-  }
+
+    let cancelled = false
+    setIsLoadingDetail(true)
+    setError(null)
+
+    void getManufacturingProject(route.detailId)
+      .then(detail => {
+        if (!cancelled) {
+          setSelected(detail)
+          setSelectedStatus(detail.status)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError('Unable to load selected manufacturing project.')
+          setSelected(null)
+          setSelectedStatus('')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingDetail(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [route.detailId, route.mode])
 
   async function analyzeNote() {
     if (!noteFile) {
@@ -409,13 +634,11 @@ export function ManufacturingPanel() {
         customFields: payloadCustomFields
       })
 
-      setView('list')
       setCreateMode('upload')
       setNoteFile(null)
       setDraft(buildDraft(defaultStatus, activeFields))
       await loadRecords(search, statusFilter)
-      setSelected(created)
-      setSelectedStatus(created.status)
+      navigate(`/dashboard/manufacturing/${created.id}`)
     } catch {
       setError('Unable to create manufacturing project.')
     } finally {
@@ -446,7 +669,32 @@ export function ManufacturingPanel() {
     }
   }
 
-  if (view === 'create') {
+  function openDetail(projectId: number) {
+    navigate(`/dashboard/manufacturing/${projectId}`)
+  }
+
+  function closeDetail() {
+    navigate('/dashboard/manufacturing')
+  }
+
+  function openFullDetail() {
+    if (!route.detailId) {
+      return
+    }
+
+    navigate(`/dashboard/manufacturing/${route.detailId}/full`)
+  }
+
+  function closeFullDetail() {
+    if (!route.detailId) {
+      navigate('/dashboard/manufacturing')
+      return
+    }
+
+    navigate(`/dashboard/manufacturing/${route.detailId}`)
+  }
+
+  if (route.mode === 'create') {
     return (
       <section className="content-card content-card-full">
         <div className="card-head">
@@ -458,7 +706,7 @@ export function ManufacturingPanel() {
             type="button"
             className="secondary-btn"
             onClick={() => {
-              setView('list')
+              navigate('/dashboard/manufacturing')
               setCreateMode('upload')
               setNoteFile(null)
             }}
@@ -676,205 +924,157 @@ export function ManufacturingPanel() {
     )
   }
 
-  return (
-    <>
-      <section className="content-card">
+  const listCard = (
+    <section className="content-card">
+      <div className="card-head">
+        <div>
+          <h3>Manufacturing Records</h3>
+          <p>{totalCount.toLocaleString()} projects across production workflow stages</p>
+        </div>
+        <button
+          type="button"
+          className="primary-btn"
+          onClick={() => {
+            navigate('/dashboard/manufacturing/new')
+            setCreateMode('upload')
+            setNoteFile(null)
+          }}
+        >
+          New Project
+        </button>
+      </div>
+
+      {error ? <p className="error-banner">{error}</p> : null}
+
+      <div className="filter-grid">
+        <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search code, piece, designer, craftsman" />
+        <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+          <option value="all">All statuses</option>
+          {statusOptions.map(status => (
+            <option key={status} value={status}>
+              {labelize(status)}
+            </option>
+          ))}
+        </select>
+        <div />
+      </div>
+
+      {isLoading ? (
+        <p className="panel-placeholder">Loading manufacturing projects...</p>
+      ) : (
+        <div className="usage-table-wrap">
+          <table className="usage-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Piece</th>
+                <th>Status</th>
+                <th>Designer</th>
+                <th>Selling Price</th>
+                <th>Customer</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.map(record => (
+                <tr key={record.id} onClick={() => openDetail(record.id)}>
+                  <td>{record.manufacturingCode}</td>
+                  <td>
+                    <strong>{record.pieceName}</strong>
+                    <p className="inline-subtext">{labelize(record.pieceType)}</p>
+                  </td>
+                  <td>{labelize(record.status)}</td>
+                  <td>{record.designerName ?? '-'}</td>
+                  <td>{formatCurrency(record.sellingPrice)}</td>
+                  <td>{record.customerName ?? '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+
+  if (route.isFull) {
+    return (
+      <section className="content-card detail-page-card">
         <div className="card-head">
           <div>
-            <h3>Manufacturing Records</h3>
-            <p>{totalCount.toLocaleString()} projects across production workflow stages</p>
+            <h3>Manufacturing Project Detail</h3>
+            <p>Full page view for one project record.</p>
           </div>
-          <button
-            type="button"
-            className="primary-btn"
-            onClick={() => {
-              setView('create')
-              setCreateMode('upload')
-              setNoteFile(null)
+          <div className="detail-actions-row">
+            <button type="button" className="secondary-btn" onClick={closeFullDetail}>
+              Back To Split View
+            </button>
+            <button type="button" className="secondary-btn" onClick={closeDetail}>
+              Back To Table
+            </button>
+          </div>
+        </div>
+
+        {isLoadingDetail ? (
+          <p className="panel-placeholder">Loading manufacturing detail...</p>
+        ) : selected ? (
+          <ManufacturingDetailContent
+            selected={selected}
+            selectedStatus={selectedStatus}
+            statusOptions={statusOptions}
+            customFieldLabels={customFieldLabels}
+            stepRequirementsByStatus={stepRequirementsByStatus}
+            isSaving={isSaving}
+            onSelectedStatusChange={setSelectedStatus}
+            onUpdateStatus={() => {
+              void handleUpdateStatus()
             }}
-          >
-            New Project
-          </button>
-        </div>
-
-        {error ? <p className="error-banner">{error}</p> : null}
-
-        <div className="filter-grid">
-          <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search code, piece, designer, craftsman" />
-          <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
-            <option value="all">All statuses</option>
-            {statusOptions.map(status => (
-              <option key={status} value={status}>
-                {labelize(status)}
-              </option>
-            ))}
-          </select>
-          <div />
-        </div>
-
-        {isLoading ? (
-          <p className="panel-placeholder">Loading manufacturing projects...</p>
+          />
         ) : (
-          <div className="usage-table-wrap">
-            <table className="usage-table">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Piece</th>
-                  <th>Status</th>
-                  <th>Designer</th>
-                  <th>Selling Price</th>
-                  <th>Customer</th>
-                </tr>
-              </thead>
-              <tbody>
-                {records.map(record => (
-                  <tr key={record.id} onClick={() => void openDetail(record.id)}>
-                    <td>{record.manufacturingCode}</td>
-                    <td>
-                      <strong>{record.pieceName}</strong>
-                      <p className="inline-subtext">{labelize(record.pieceType)}</p>
-                    </td>
-                    <td>{labelize(record.status)}</td>
-                    <td>{record.designerName ?? '-'}</td>
-                    <td>{formatCurrency(record.sellingPrice)}</td>
-                    <td>{record.customerName ?? '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <p className="panel-placeholder">No manufacturing detail found for this route.</p>
         )}
       </section>
+    )
+  }
 
-      {selected ? (
-        <div className="detail-modal-backdrop" onClick={() => setSelected(null)}>
-          <section className="detail-modal-panel" onClick={event => event.stopPropagation()}>
-            <div className="drawer-head">
-              <h3>{selected.manufacturingCode} · {selected.pieceName}</h3>
-              <button type="button" className="secondary-btn" onClick={() => setSelected(null)}>Close</button>
-            </div>
+  return (
+    <div className={`content-split ${route.mode === 'detail' ? 'has-detail' : ''}`}>
+      <div className="content-split-main">
+        {listCard}
+      </div>
 
-            <div className="drawer-grid">
-              <p><strong>Type:</strong> {labelize(selected.pieceType)}</p>
-              <p><strong>Status:</strong> {labelize(selected.status)}</p>
-              <p><strong>Design Date:</strong> {formatDate(selected.designDate)}</p>
-              <p><strong>Completion Date:</strong> {formatDate(selected.completionDate)}</p>
-              <p><strong>Designer:</strong> {selected.designerName ?? '-'}</p>
-              <p><strong>Craftsman:</strong> {selected.craftsmanName ?? '-'}</p>
-              <p><strong>Metal Plating:</strong> {selected.metalPlating.length > 0 ? selected.metalPlating.map(value => labelize(value)).join(', ') : '-'}</p>
-              <p><strong>Plating Notes:</strong> {selected.metalPlatingNotes ?? '-'}</p>
-              <p><strong>Setting Cost:</strong> {formatCurrency(selected.settingCost)}</p>
-              <p><strong>Diamond Cost:</strong> {formatCurrency(selected.diamondCost)}</p>
-              <p><strong>Gemstone Cost:</strong> {formatCurrency(selected.gemstoneCost)}</p>
-              <p><strong>Selling Price:</strong> {formatCurrency(selected.sellingPrice)}</p>
-              <p><strong>Total Cost:</strong> {formatCurrency(selected.totalCost)}</p>
-              <p><strong>Customer:</strong> {selected.customerName ?? '-'}</p>
-              <p><strong>Sold At:</strong> {formatDate(selected.soldAt)}</p>
-              <p><strong>Created:</strong> {formatDate(selected.createdAtUtc)}</p>
-              <p><strong>Updated:</strong> {formatDate(selected.updatedAtUtc)}</p>
-            </div>
-
-            {Object.keys(selected.customFields).length > 0 ? (
-              <div className="usage-lines">
-                <h4>Custom Fields</h4>
-                <div className="activity-list">
-                  {Object.entries(selected.customFields).map(([key, value]) => (
-                    <article key={key}>
-                      <p><strong>{customFieldLabels[key] ?? labelize(key)}</strong></p>
-                      <p>{value ?? '-'}</p>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="status-update-row">
-              <select value={selectedStatus} onChange={event => setSelectedStatus(event.target.value)}>
-                {statusOptions.map(status => (
-                  <option key={status} value={status}>{labelize(status)}</option>
-                ))}
-              </select>
-              <button type="button" className="primary-btn" onClick={() => void handleUpdateStatus()} disabled={isSaving || selectedStatus === selected.status}>
-                {isSaving ? 'Updating...' : 'Update Status'}
+      {route.mode === 'detail' ? (
+        <aside className="detail-side-panel">
+          <div className="drawer-head">
+            <h3>Manufacturing Detail</h3>
+            <div className="detail-actions-row">
+              <button type="button" className="secondary-btn" onClick={openFullDetail}>
+                Full Screen
+              </button>
+              <button type="button" className="secondary-btn" onClick={closeDetail}>
+                Close
               </button>
             </div>
-            {(stepRequirementsByStatus[selectedStatus]?.requirePhoto || stepRequirementsByStatus[selectedStatus]?.requireComment) ? (
-              <p className="panel-placeholder">
-                {labelize(selectedStatus)}
-                {' '}
-                requires:
-                {' '}
-                {stepRequirementsByStatus[selectedStatus]?.requirePhoto ? 'photo' : 'no photo'}
-                {' / '}
-                {stepRequirementsByStatus[selectedStatus]?.requireComment ? 'comment' : 'no comment'}
-              </p>
-            ) : null}
+          </div>
 
-            {selected.usageNotes ? (
-              <div className="usage-lines">
-                <h4>Notes</h4>
-                <p>{selected.usageNotes}</p>
-              </div>
-            ) : null}
-
-            {selected.photos.length > 0 ? (
-              <div className="usage-lines">
-                <h4>Photos</h4>
-                <div className="activity-list">
-                  {selected.photos.map((photo, index) => (
-                    <article key={`${photo}-${index}`}>
-                      <a href={photo} target="_blank" rel="noreferrer">{photo}</a>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="usage-lines">
-              <h4>Gemstones</h4>
-              {selected.gemstones.length === 0 ? (
-                <p className="panel-placeholder">No gemstones linked yet.</p>
-              ) : (
-                <div className="activity-list">
-                  {selected.gemstones.map(gem => (
-                    <article key={gem.id}>
-                      <p>
-                        <strong>{gem.gemstoneCode ?? `#${gem.inventoryItemId ?? '?'}`}</strong>
-                        {' • '}
-                        {gem.gemstoneType ?? 'Unknown'}
-                      </p>
-                      <p>{gem.weightUsedCt} ct / {gem.piecesUsed} pcs</p>
-                      <p>{formatCurrency(gem.lineCost)}</p>
-                      {gem.notes ? <p>{gem.notes}</p> : null}
-                    </article>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="usage-lines">
-              <h4>Activity Log</h4>
-              {selected.activityLog.length === 0 ? (
-                <p className="panel-placeholder">No activity entries yet.</p>
-              ) : (
-                <div className="activity-list">
-                  {selected.activityLog.map(entry => (
-                    <article key={entry.id}>
-                      <p>
-                        <strong>{labelize(entry.status)}</strong>
-                        {' • '}
-                        {formatDate(entry.activityAtUtc)}
-                      </p>
-                      {entry.notes ? <p>{entry.notes}</p> : null}
-                    </article>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
+          {isLoadingDetail ? (
+            <p className="panel-placeholder">Loading manufacturing detail...</p>
+          ) : selected ? (
+            <ManufacturingDetailContent
+              selected={selected}
+              selectedStatus={selectedStatus}
+              statusOptions={statusOptions}
+              customFieldLabels={customFieldLabels}
+              stepRequirementsByStatus={stepRequirementsByStatus}
+              isSaving={isSaving}
+              onSelectedStatusChange={setSelectedStatus}
+              onUpdateStatus={() => {
+                void handleUpdateStatus()
+              }}
+            />
+          ) : (
+            <p className="panel-placeholder">No manufacturing detail found for this record.</p>
+          )}
+        </aside>
       ) : null}
-    </>
+    </div>
   )
 }
