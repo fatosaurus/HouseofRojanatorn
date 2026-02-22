@@ -288,6 +288,129 @@ public sealed class CustomerManufacturingFunctions
         return response;
     }
 
+    [Function("GetManufacturingPeople")]
+    public async Task<HttpResponseData> GetManufacturingPeople(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "manufacturing/people")] HttpRequestData req)
+    {
+        var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+        var role = query["role"];
+        var activeOnly = !bool.TryParse(query["activeOnly"], out var parsedActiveOnly) || parsedActiveOnly;
+
+        try
+        {
+            var people = await _service.GetManufacturingPeopleAsync(role, activeOnly, req.FunctionContext.CancellationToken);
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(people);
+            return response;
+        }
+        catch (ArgumentException ex)
+        {
+            return await BadRequestAsync(req, ex.Message);
+        }
+    }
+
+    [Function("GetManufacturingPersonProfile")]
+    public async Task<HttpResponseData> GetManufacturingPersonProfile(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "manufacturing/people/{id:int}")] HttpRequestData req,
+        int id)
+    {
+        var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+        var limit = ParseInt(query["limit"], 200);
+
+        var profile = await _service.GetManufacturingPersonProfileAsync(id, limit, req.FunctionContext.CancellationToken);
+        if (profile is null)
+        {
+            return await NotFoundAsync(req, "Manufacturing person not found.");
+        }
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(profile);
+        return response;
+    }
+
+    [Function("CreateManufacturingPerson")]
+    public async Task<HttpResponseData> CreateManufacturingPerson(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "manufacturing/people")] HttpRequestData req)
+    {
+        if (!IsAdmin(GetPrincipal(req.FunctionContext)))
+        {
+            return await ForbiddenAsync(req, "Admin role required.");
+        }
+
+        var body = await DeserializeBodyAsync<ManufacturingPersonUpsertRequest>(req);
+        if (body is null)
+        {
+            return await BadRequestAsync(req, "Invalid manufacturing person payload.");
+        }
+
+        try
+        {
+            var created = await _service.CreateManufacturingPersonAsync(body, req.FunctionContext.CancellationToken);
+            var response = req.CreateResponse(HttpStatusCode.Created);
+            await response.WriteAsJsonAsync(created);
+            return response;
+        }
+        catch (ArgumentException ex)
+        {
+            return await BadRequestAsync(req, ex.Message);
+        }
+    }
+
+    [Function("UpdateManufacturingPerson")]
+    public async Task<HttpResponseData> UpdateManufacturingPerson(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "manufacturing/people/{id:int}")] HttpRequestData req,
+        int id)
+    {
+        if (!IsAdmin(GetPrincipal(req.FunctionContext)))
+        {
+            return await ForbiddenAsync(req, "Admin role required.");
+        }
+
+        var body = await DeserializeBodyAsync<ManufacturingPersonUpsertRequest>(req);
+        if (body is null)
+        {
+            return await BadRequestAsync(req, "Invalid manufacturing person payload.");
+        }
+
+        try
+        {
+            var updated = await _service.UpdateManufacturingPersonAsync(id, body, req.FunctionContext.CancellationToken);
+            if (updated is null)
+            {
+                return await NotFoundAsync(req, "Manufacturing person not found.");
+            }
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(updated);
+            return response;
+        }
+        catch (ArgumentException ex)
+        {
+            return await BadRequestAsync(req, ex.Message);
+        }
+    }
+
+    [Function("DeleteManufacturingPerson")]
+    public async Task<HttpResponseData> DeleteManufacturingPerson(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "manufacturing/people/{id:int}")] HttpRequestData req,
+        int id)
+    {
+        if (!IsAdmin(GetPrincipal(req.FunctionContext)))
+        {
+            return await ForbiddenAsync(req, "Admin role required.");
+        }
+
+        var deleted = await _service.DeleteManufacturingPersonAsync(id, req.FunctionContext.CancellationToken);
+        if (!deleted)
+        {
+            return await NotFoundAsync(req, "Manufacturing person not found.");
+        }
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { success = true });
+        return response;
+    }
+
     [Function("GetBusinessAnalytics")]
     public async Task<HttpResponseData> GetBusinessAnalytics(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "analytics")] HttpRequestData req)

@@ -51,6 +51,32 @@ public sealed class NoopCustomerManufacturingSqlService : ICustomerManufacturing
     public Task<bool> DeleteManufacturingProjectAsync(int projectId, CancellationToken cancellationToken = default)
         => Task.FromResult(false);
 
+    public Task<IReadOnlyList<ManufacturingPersonResponse>> GetManufacturingPeopleAsync(
+        string? role,
+        bool activeOnly,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<ManufacturingPersonResponse>>([]);
+
+    public Task<ManufacturingPersonResponse> CreateManufacturingPersonAsync(
+        ManufacturingPersonUpsertRequest request,
+        CancellationToken cancellationToken = default)
+        => Task.FromException<ManufacturingPersonResponse>(new InvalidOperationException("SQL connection is not configured."));
+
+    public Task<ManufacturingPersonResponse?> UpdateManufacturingPersonAsync(
+        int personId,
+        ManufacturingPersonUpsertRequest request,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<ManufacturingPersonResponse?>(null);
+
+    public Task<bool> DeleteManufacturingPersonAsync(int personId, CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
+
+    public Task<ManufacturingPersonProfileResponse?> GetManufacturingPersonProfileAsync(
+        int personId,
+        int limit,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<ManufacturingPersonProfileResponse?>(null);
+
     public Task<ManufacturingSettingsResponse> GetManufacturingSettingsAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(new ManufacturingSettingsResponse
         {

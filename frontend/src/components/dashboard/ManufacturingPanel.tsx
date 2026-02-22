@@ -63,6 +63,22 @@ function parsePhotos(value: string): string[] {
     .filter(item => item.length > 0)
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result
+      if (typeof result !== 'string' || result.length === 0) {
+        reject(new Error('Unable to read selected image.'))
+        return
+      }
+      resolve(result)
+    }
+    reader.onerror = () => reject(new Error('Unable to read selected image.'))
+    reader.readAsDataURL(file)
+  })
+}
+
 interface OcrWorkerResult {
   data?: {
     text?: string
@@ -269,7 +285,14 @@ interface DetailContentProps {
   customFieldLabels: Record<string, string>
   stepRequirementsByStatus: Record<string, { requirePhoto: boolean, requireComment: boolean }>
   isSaving: boolean
+  statusNote: string
+  pendingStepPhotos: Array<{ name: string, dataUrl: string }>
+  hasExistingStepPhotoEvidence: boolean
+  canSubmitStatusUpdate: boolean
   onSelectedStatusChange: (value: string) => void
+  onStatusNoteChange: (value: string) => void
+  onPendingStepPhotosSelect: (files: FileList | null) => void
+  onRemovePendingStepPhoto: (index: number) => void
   onUpdateStatus: () => void
 }
 
@@ -280,9 +303,18 @@ function ManufacturingDetailContent({
   customFieldLabels,
   stepRequirementsByStatus,
   isSaving,
+  statusNote,
+  pendingStepPhotos,
+  hasExistingStepPhotoEvidence,
+  canSubmitStatusUpdate,
   onSelectedStatusChange,
+  onStatusNoteChange,
+  onPendingStepPhotosSelect,
+  onRemovePendingStepPhoto,
   onUpdateStatus
 }: DetailContentProps) {
+  const selectedRequirements = stepRequirementsByStatus[selectedStatus]
+
   return (
     <>
       <div className="drawer-grid">
@@ -319,25 +351,60 @@ function ManufacturingDetailContent({
         </div>
       ) : null}
 
-      <div className="status-update-row">
-        <select value={selectedStatus} onChange={event => onSelectedStatusChange(event.target.value)}>
-          {statusOptions.map(status => (
-            <option key={status} value={status}>{labelize(status)}</option>
-          ))}
-        </select>
-        <button type="button" className="primary-btn" onClick={onUpdateStatus} disabled={isSaving || selectedStatus === selected.status}>
-          {isSaving ? 'Updating...' : 'Update Status'}
-        </button>
+      <div className="usage-lines">
+        <h4>Step Update</h4>
+        <div className="status-update-row">
+          <select value={selectedStatus} onChange={event => onSelectedStatusChange(event.target.value)}>
+            {statusOptions.map(status => (
+              <option key={status} value={status}>{labelize(status)}</option>
+            ))}
+          </select>
+          <button type="button" className="primary-btn" onClick={onUpdateStatus} disabled={isSaving || !canSubmitStatusUpdate}>
+            {isSaving ? 'Updating...' : 'Save Step Update'}
+          </button>
+        </div>
+        {(selectedRequirements?.requirePhoto || selectedRequirements?.requireComment) ? (
+          <p className="panel-placeholder">
+            {labelize(selectedStatus)} requires:
+            {' '}
+            {selectedRequirements?.requirePhoto ? 'photo' : 'no photo'}
+            {' / '}
+            {selectedRequirements?.requireComment ? 'comment' : 'no comment'}
+            {selectedRequirements?.requirePhoto && hasExistingStepPhotoEvidence ? ' (existing photo evidence found)' : ''}
+          </p>
+        ) : null}
+        <label className="step-evidence-label">
+          Step Comment
+          <textarea
+            rows={2}
+            value={statusNote}
+            onChange={event => onStatusNoteChange(event.target.value)}
+            placeholder="Describe what was completed at this step..."
+          />
+        </label>
+        <label className="step-evidence-label">
+          Step Photos
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={event => onPendingStepPhotosSelect(event.target.files)}
+          />
+        </label>
+        {pendingStepPhotos.length > 0 ? (
+          <div className="activity-photo-grid">
+            {pendingStepPhotos.map((photo, index) => (
+              <article key={`${photo.name}-${index}`} className="pending-photo-card">
+                <img src={photo.dataUrl} alt={photo.name} />
+                <p>{photo.name}</p>
+                <button type="button" className="icon-btn" onClick={() => onRemovePendingStepPhoto(index)} aria-label="Remove photo" title="Remove photo">
+                  <X size={14} />
+                </button>
+              </article>
+            ))}
+          </div>
+        ) : null}
       </div>
-      {(stepRequirementsByStatus[selectedStatus]?.requirePhoto || stepRequirementsByStatus[selectedStatus]?.requireComment) ? (
-        <p className="panel-placeholder">
-          {labelize(selectedStatus)} requires:
-          {' '}
-          {stepRequirementsByStatus[selectedStatus]?.requirePhoto ? 'photo' : 'no photo'}
-          {' / '}
-          {stepRequirementsByStatus[selectedStatus]?.requireComment ? 'comment' : 'no comment'}
-        </p>
-      ) : null}
 
       {selected.usageNotes ? (
         <div className="usage-lines">
@@ -395,6 +462,15 @@ function ManufacturingDetailContent({
                   {formatDate(entry.activityAtUtc)}
                 </p>
                 {entry.notes ? <p>{entry.notes}</p> : null}
+                {entry.photos.length > 0 ? (
+                  <div className="activity-photo-grid">
+                    {entry.photos.map((photo, index) => (
+                      <a key={`${entry.id}-${index}`} href={photo} target="_blank" rel="noreferrer" className="activity-photo-item">
+                        <img src={photo} alt={`Step evidence ${index + 1}`} />
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
               </article>
             ))}
           </div>
@@ -422,6 +498,8 @@ export function ManufacturingPanel() {
 
   const [selected, setSelected] = useState<ManufacturingProjectDetail | null>(null)
   const [selectedStatus, setSelectedStatus] = useState('')
+  const [statusNote, setStatusNote] = useState('')
+  const [pendingStepPhotos, setPendingStepPhotos] = useState<Array<{ name: string, dataUrl: string }>>([])
 
   const [createMode, setCreateMode] = useState<'upload' | 'manual'>('upload')
   const [draft, setDraft] = useState<ProjectDraft>(() => buildDraft('approved', []))
@@ -508,6 +586,33 @@ export function ManufacturingPanel() {
   const draftGemstoneCost = useMemo(() => calculateGemstoneCost(draft.gemstones), [draft.gemstones])
   const editGemstoneCost = useMemo(() => calculateGemstoneCost(editDraft.gemstones), [editDraft.gemstones])
 
+  const designerOptions = useMemo(() => (settings?.designers ?? []).map(item => item.name), [settings?.designers])
+  const craftsmanOptions = useMemo(() => (settings?.craftsmen ?? []).map(item => item.name), [settings?.craftsmen])
+
+  const hasExistingStepPhotoEvidence = useMemo(() => {
+    if (!selected || !selectedStatus) {
+      return false
+    }
+
+    if (selected.photos.length > 0) {
+      return true
+    }
+
+    return selected.activityLog.some(entry => entry.status === selectedStatus && entry.photos.length > 0)
+  }, [selected, selectedStatus])
+
+  const canSubmitStatusUpdate = useMemo(() => {
+    if (!selected || !selectedStatus) {
+      return false
+    }
+
+    if (selectedStatus !== selected.status) {
+      return true
+    }
+
+    return statusNote.trim().length > 0 || pendingStepPhotos.length > 0
+  }, [pendingStepPhotos.length, selected, selectedStatus, statusNote])
+
   async function loadRecords(currentSearch: string, currentStatus: string) {
     setIsLoading(true)
     setError(null)
@@ -560,6 +665,8 @@ export function ManufacturingPanel() {
     if ((route.mode !== 'detail' && route.mode !== 'edit') || !route.detailId) {
       setSelected(null)
       setSelectedStatus('')
+      setStatusNote('')
+      setPendingStepPhotos([])
       setIsLoadingDetail(false)
       return
     }
@@ -595,6 +702,11 @@ export function ManufacturingPanel() {
       cancelled = true
     }
   }, [activeFields, route.detailId, route.mode])
+
+  useEffect(() => {
+    setStatusNote('')
+    setPendingStepPhotos([])
+  }, [selectedStatus, route.detailId])
 
   async function analyzeNote() {
     if (!noteFile) {
@@ -689,6 +801,30 @@ export function ManufacturingPanel() {
     }))
   }
 
+  async function handlePendingStepPhotosSelect(files: FileList | null) {
+    if (!files || files.length === 0) {
+      return
+    }
+
+    try {
+      const selectedFiles = Array.from(files).slice(0, 8)
+      const encoded = await Promise.all(
+        selectedFiles.map(async file => ({
+          name: file.name,
+          dataUrl: await readFileAsDataUrl(file)
+        }))
+      )
+
+      setPendingStepPhotos(current => [...current, ...encoded])
+    } catch {
+      setError('Unable to read one or more selected images.')
+    }
+  }
+
+  function removePendingStepPhoto(index: number) {
+    setPendingStepPhotos(current => current.filter((_, currentIndex) => currentIndex !== index))
+  }
+
   async function handleCreate() {
     if (!draft.manufacturingCode.trim() || !draft.pieceName.trim()) {
       setError('Manufacturing code and piece name are required.')
@@ -773,16 +909,37 @@ export function ManufacturingPanel() {
       return
     }
 
+    const selectedStepRequirements = stepRequirementsByStatus[selectedStatus]
+    const normalizedNote = statusNote.trim()
+    const hasPendingPhotos = pendingStepPhotos.length > 0
+
+    if (selectedStepRequirements?.requirePhoto && !hasPendingPhotos && !hasExistingStepPhotoEvidence) {
+      setError(`Photo upload is required for ${labelize(selectedStatus)}.`)
+      return
+    }
+
+    if (selectedStepRequirements?.requireComment && !normalizedNote) {
+      setError(`A step comment is required for ${labelize(selectedStatus)}.`)
+      return
+    }
+
     setIsSaving(true)
     setError(null)
 
     try {
+      const statusChanged = selectedStatus !== selected.status
       const updated = await updateManufacturingProject(selected.id, {
         status: selectedStatus,
-        activityNote: `Status updated from dashboard to ${selectedStatus}`
+        activityNote: normalizedNote || (statusChanged
+          ? `Status updated from dashboard to ${selectedStatus}`
+          : `Step evidence added for ${selectedStatus}`),
+        activityPhotos: hasPendingPhotos ? pendingStepPhotos.map(photo => photo.dataUrl) : null
       })
 
       setSelected(updated)
+      setSelectedStatus(updated.status)
+      setStatusNote('')
+      setPendingStepPhotos([])
       await loadRecords(search, statusFilter)
     } catch {
       setError('Unable to update project status.')
@@ -971,6 +1128,16 @@ export function ManufacturingPanel() {
 
         {createMode === 'manual' ? (
           <div className="crm-form-grid" style={{ marginTop: '0.8rem' }}>
+            <datalist id="designer-options">
+              {designerOptions.map(option => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
+            <datalist id="craftsman-options">
+              {craftsmanOptions.map(option => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
             <label>
               Manufacturing Code
               <input value={draft.manufacturingCode} onChange={event => setDraft(current => ({ ...current, manufacturingCode: event.target.value }))} />
@@ -1012,7 +1179,9 @@ export function ManufacturingPanel() {
                   <label key={field.fieldKey}>
                     {field.label}
                     <input
+                      list="designer-options"
                       value={draft.designerName}
+                      placeholder={designerOptions.length > 0 ? 'Select or type designer' : 'Designer name'}
                       onChange={event => setDraft(current => ({ ...current, designerName: event.target.value }))}
                       required={field.isRequired}
                     />
@@ -1025,7 +1194,9 @@ export function ManufacturingPanel() {
                   <label key={field.fieldKey}>
                     {field.label}
                     <input
+                      list="craftsman-options"
                       value={draft.craftsmanName}
+                      placeholder={craftsmanOptions.length > 0 ? 'Select or type craftsman' : 'Craftsman name'}
                       onChange={event => setDraft(current => ({ ...current, craftsmanName: event.target.value }))}
                       required={field.isRequired}
                     />
@@ -1230,6 +1401,16 @@ export function ManufacturingPanel() {
           <p className="panel-placeholder">Loading manufacturing detail...</p>
         ) : selected ? (
           <div className="crm-form-grid">
+            <datalist id="designer-options-edit">
+              {designerOptions.map(option => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
+            <datalist id="craftsman-options-edit">
+              {craftsmanOptions.map(option => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
             <label>
               Manufacturing Code
               <input value={editDraft.manufacturingCode} onChange={event => setEditDraft(current => ({ ...current, manufacturingCode: event.target.value }))} />
@@ -1257,11 +1438,21 @@ export function ManufacturingPanel() {
 
             <label>
               Designer
-              <input value={editDraft.designerName} onChange={event => setEditDraft(current => ({ ...current, designerName: event.target.value }))} />
+              <input
+                list="designer-options-edit"
+                value={editDraft.designerName}
+                placeholder={designerOptions.length > 0 ? 'Select or type designer' : 'Designer name'}
+                onChange={event => setEditDraft(current => ({ ...current, designerName: event.target.value }))}
+              />
             </label>
             <label>
               Craftsman
-              <input value={editDraft.craftsmanName} onChange={event => setEditDraft(current => ({ ...current, craftsmanName: event.target.value }))} />
+              <input
+                list="craftsman-options-edit"
+                value={editDraft.craftsmanName}
+                placeholder={craftsmanOptions.length > 0 ? 'Select or type craftsman' : 'Craftsman name'}
+                onChange={event => setEditDraft(current => ({ ...current, craftsmanName: event.target.value }))}
+              />
             </label>
 
             {Object.entries(editDraft.customFields).map(([fieldKey, value]) => (
@@ -1501,7 +1692,16 @@ export function ManufacturingPanel() {
             customFieldLabels={customFieldLabels}
             stepRequirementsByStatus={stepRequirementsByStatus}
             isSaving={isSaving}
+            statusNote={statusNote}
+            pendingStepPhotos={pendingStepPhotos}
+            hasExistingStepPhotoEvidence={hasExistingStepPhotoEvidence}
+            canSubmitStatusUpdate={canSubmitStatusUpdate}
             onSelectedStatusChange={setSelectedStatus}
+            onStatusNoteChange={setStatusNote}
+            onPendingStepPhotosSelect={files => {
+              void handlePendingStepPhotosSelect(files)
+            }}
+            onRemovePendingStepPhoto={removePendingStepPhoto}
             onUpdateStatus={() => {
               void handleUpdateStatus()
             }}
@@ -1546,7 +1746,16 @@ export function ManufacturingPanel() {
               customFieldLabels={customFieldLabels}
               stepRequirementsByStatus={stepRequirementsByStatus}
               isSaving={isSaving}
+              statusNote={statusNote}
+              pendingStepPhotos={pendingStepPhotos}
+              hasExistingStepPhotoEvidence={hasExistingStepPhotoEvidence}
+              canSubmitStatusUpdate={canSubmitStatusUpdate}
               onSelectedStatusChange={setSelectedStatus}
+              onStatusNoteChange={setStatusNote}
+              onPendingStepPhotosSelect={files => {
+                void handlePendingStepPhotosSelect(files)
+              }}
+              onRemovePendingStepPhoto={removePendingStepPhoto}
               onUpdateStatus={() => {
                 void handleUpdateStatus()
               }}
