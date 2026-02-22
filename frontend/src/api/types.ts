@@ -200,6 +200,7 @@ export interface ManufacturingActivityLog {
   activityAtUtc: string
   craftsmanName: string | null
   notes: string | null
+  photos: string[]
 }
 
 export interface ManufacturingProjectSummary {
@@ -288,7 +289,32 @@ export interface ManufacturingProjectUpsertRequest {
   soldAt?: string | null
   gemstones?: ManufacturingGemstoneUpsertRequest[] | null
   activityNote?: string | null
+  activityPhotos?: string[] | null
   customFields?: Record<string, string | null> | null
+}
+
+export interface ManufacturingPerson {
+  id: number
+  role: 'designer' | 'craftsman'
+  name: string
+  email: string | null
+  phone: string | null
+  isActive: boolean
+  createdAtUtc: string
+  updatedAtUtc: string
+}
+
+export interface ManufacturingPersonUpsertRequest {
+  role: 'designer' | 'craftsman'
+  name: string
+  email?: string | null
+  phone?: string | null
+  isActive?: boolean
+}
+
+export interface ManufacturingPersonProfile {
+  person: ManufacturingPerson
+  projects: ManufacturingProjectSummary[]
 }
 
 export interface ManufacturingProcessStep {
@@ -314,6 +340,8 @@ export interface ManufacturingCustomField {
 export interface ManufacturingSettings {
   steps: ManufacturingProcessStep[]
   fields: ManufacturingCustomField[]
+  designers: ManufacturingPerson[]
+  craftsmen: ManufacturingPerson[]
 }
 
 export interface ManufacturingProcessStepUpsertRequest {

@@ -890,6 +890,224 @@ a:focus-visible {
   background: #fffdf9;
 }
 
+.step-evidence-label {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+  font-size: 0.84rem;
+  color: var(--ink-700);
+}
+
+.step-evidence-label textarea,
+.step-evidence-label input[type='file'] {
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  padding: 0.62rem 0.7rem;
+  background: #fffdf9;
+}
+
+.activity-photo-grid {
+  margin-top: 0.6rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 0.52rem;
+}
+
+.activity-photo-item,
+.pending-photo-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.activity-photo-item img,
+.pending-photo-card img {
+  display: block;
+  width: 100%;
+  height: 88px;
+  object-fit: cover;
+}
+
+.pending-photo-card {
+  padding: 0.4rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.pending-photo-card p {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ink-700);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.88rem;
+}
+
+.settings-layout.has-profile {
+  grid-template-columns: minmax(0, 1fr) 370px;
+}
+
+.settings-dark-panel {
+  background: radial-gradient(circle at top right, rgba(216, 138, 0, 0.12), transparent 44%), #07090d;
+  border-color: #181f2a;
+  color: #f8fafc;
+}
+
+.settings-dark-panel .panel-placeholder {
+  color: #8ea3be;
+}
+
+.settings-dark-panel .error-banner {
+  background: rgba(127, 29, 29, 0.2);
+  border-color: rgba(252, 165, 165, 0.28);
+  color: #fecaca;
+}
+
+.settings-dark-headline p {
+  color: #8ea3be;
+}
+
+.settings-dark-block {
+  margin-top: 1rem;
+  border: 1px solid #182132;
+  border-radius: 16px;
+  background: rgba(8, 11, 17, 0.86);
+  padding: 1rem;
+}
+
+.settings-dark-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.settings-dark-section-head h4 {
+  margin: 0;
+  font-size: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.44rem;
+}
+
+.settings-dark-section-head p {
+  margin: 0.28rem 0 0;
+  color: #8ea3be;
+  font-size: 0.84rem;
+}
+
+.settings-dark-table-wrap {
+  border-color: #1b2332;
+  background: #070b12;
+}
+
+.settings-dark-table th {
+  background: #0d131d;
+  color: #c6d2e3;
+  border-bottom-color: #1f2c3f;
+}
+
+.settings-dark-table td {
+  border-bottom-color: #172234;
+  color: #e2e8f0;
+}
+
+.settings-dark-table tbody tr {
+  cursor: default;
+}
+
+.settings-dark-table tbody tr:hover {
+  background: #0c1320;
+}
+
+.settings-dark-table input,
+.settings-dark-table select {
+  width: 100%;
+  border: 1px solid #263247;
+  border-radius: 10px;
+  padding: 0.52rem 0.6rem;
+  background: #0a111b;
+  color: #f8fafc;
+}
+
+.settings-dark-table input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: #18c964;
+  border-radius: 4px;
+  padding: 0;
+}
+
+.settings-dark-table input::placeholder {
+  color: #6f819b;
+}
+
+.workforce-table td:last-child {
+  width: 130px;
+}
+
+.workforce-actions {
+  display: flex;
+  gap: 0.42rem;
+}
+
+.settings-dark-panel .primary-btn {
+  background: linear-gradient(180deg, #f3bb39, #e49a00);
+  color: #101623;
+  border-color: #e7ad34;
+  box-shadow: 0 10px 22px rgba(228, 154, 0, 0.34);
+}
+
+.settings-dark-panel .secondary-btn {
+  background: rgba(243, 187, 57, 0.1);
+  border-color: rgba(243, 187, 57, 0.4);
+  color: #ffdb89;
+}
+
+.settings-dark-panel .secondary-btn:hover {
+  background: rgba(243, 187, 57, 0.18);
+  border-color: rgba(243, 187, 57, 0.68);
+}
+
+.settings-dark-panel .icon-btn {
+  border-color: #32415a;
+  background: #0d1522;
+  color: #c6d2e3;
+}
+
+.settings-dark-panel .icon-btn:hover {
+  background: #162237;
+  border-color: #4b5f81;
+  color: #f8fafc;
+}
+
+.settings-dark-panel .icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.settings-profile-panel {
+  background: #0a101a;
+  border-color: #1d2839;
+  color: #f8fafc;
+}
+
+.settings-profile-panel .panel-placeholder {
+  color: #8ea3be;
+}
+
+.settings-profile-panel .activity-list article {
+  border-color: #263247;
+  background: #111926;
+}
+
 .customer-name-cell {
   display: inline-flex;
   align-items: center;
@@ -1084,6 +1302,10 @@ a:focus-visible {
   }
 
   .content-split.has-detail {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-layout.has-profile {
     grid-template-columns: 1fr;
   }
 

@@ -32,6 +32,22 @@ public interface ICustomerManufacturingSqlService
         ManufacturingProjectUpsertRequest request,
         CancellationToken cancellationToken = default);
     Task<bool> DeleteManufacturingProjectAsync(int projectId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ManufacturingPersonResponse>> GetManufacturingPeopleAsync(
+        string? role,
+        bool activeOnly,
+        CancellationToken cancellationToken = default);
+    Task<ManufacturingPersonResponse> CreateManufacturingPersonAsync(
+        ManufacturingPersonUpsertRequest request,
+        CancellationToken cancellationToken = default);
+    Task<ManufacturingPersonResponse?> UpdateManufacturingPersonAsync(
+        int personId,
+        ManufacturingPersonUpsertRequest request,
+        CancellationToken cancellationToken = default);
+    Task<bool> DeleteManufacturingPersonAsync(int personId, CancellationToken cancellationToken = default);
+    Task<ManufacturingPersonProfileResponse?> GetManufacturingPersonProfileAsync(
+        int personId,
+        int limit,
+        CancellationToken cancellationToken = default);
     Task<ManufacturingSettingsResponse> GetManufacturingSettingsAsync(CancellationToken cancellationToken = default);
     Task<ManufacturingSettingsResponse> SaveManufacturingSettingsAsync(
         ManufacturingSettingsUpdateRequest request,
@@ -487,20 +503,35 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             ORDER BY mg.id;
             """;
 
-        const string activitySql = """
-            SELECT
-                id,
-                status,
-                activity_at_utc,
-                craftsman_name,
-                notes
-            FROM dbo.manufacturing_activity_log
-            WHERE project_id = @ProjectId
-            ORDER BY activity_at_utc DESC, id DESC;
-            """;
-
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(cancellationToken);
+
+        var hasActivityPhotosColumn = await ColumnExistsAsync(conn, "dbo.manufacturing_activity_log", "photos_json", cancellationToken);
+        var activitySql = hasActivityPhotosColumn
+            ? """
+                SELECT
+                    id,
+                    status,
+                    activity_at_utc,
+                    craftsman_name,
+                    notes,
+                    photos_json
+                FROM dbo.manufacturing_activity_log
+                WHERE project_id = @ProjectId
+                ORDER BY activity_at_utc DESC, id DESC;
+                """
+            : """
+                SELECT
+                    id,
+                    status,
+                    activity_at_utc,
+                    craftsman_name,
+                    notes,
+                    NULL AS photos_json
+                FROM dbo.manufacturing_activity_log
+                WHERE project_id = @ProjectId
+                ORDER BY activity_at_utc DESC, id DESC;
+                """;
 
         ManufacturingProjectDetailResponse? detail;
         await using (var projectCmd = new SqlCommand(projectSql, conn))
@@ -550,6 +581,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                     ActivityAtUtc = GetDateTime(reader, "activity_at_utc"),
                     CraftsmanName = GetNullableString(reader, "craftsman_name"),
                     Notes = GetNullableString(reader, "notes"),
+                    Photos = DeserializeJsonArray(GetNullableString(reader, "photos_json"))
                 });
             }
         }
@@ -652,11 +684,14 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         try
         {
             var createStepRequirement = await GetStepRequirementAsync(conn, tx, status, cancellationToken);
+            var createHasPhotoEvidence =
+                HasAnyText(request.Photos) ||
+                HasAnyText(request.ActivityPhotos);
             EnsureStepRequirements(
                 status,
                 createStepRequirement.RequirePhoto,
                 createStepRequirement.RequireComment,
-                request.Photos,
+                createHasPhotoEvidence,
                 request.UsageNotes,
                 request.ActivityNote);
 
@@ -697,6 +732,19 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 createdId = Convert.ToInt32(await insertCmd.ExecuteScalarAsync(cancellationToken) ?? 0);
             }
 
+            await EnsureManufacturingPersonExistsAsync(
+                conn,
+                tx,
+                ManufacturingPersonRoles.Designer,
+                request.DesignerName,
+                cancellationToken);
+            await EnsureManufacturingPersonExistsAsync(
+                conn,
+                tx,
+                ManufacturingPersonRoles.Craftsman,
+                request.CraftsmanName,
+                cancellationToken);
+
             await ReplaceProjectGemstonesAsync(conn, tx, createdId, gemstonesForSave, cancellationToken);
             await InsertActivityLogAsync(
                 conn,
@@ -705,6 +753,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 status,
                 request.CraftsmanName,
                 request.ActivityNote ?? $"Project created with status: {status}",
+                request.ActivityPhotos,
                 cancellationToken);
 
             await tx.CommitAsync(cancellationToken);
@@ -799,11 +848,19 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             var photos = request.Photos ?? existing.Photos;
             var usageNotes = request.UsageNotes ?? existing.UsageNotes;
             var updateStepRequirement = await GetStepRequirementAsync(conn, tx, status, cancellationToken);
+            var hasStepPhotoEvidence = await HasStepPhotoEvidenceAsync(
+                conn,
+                tx,
+                projectId,
+                status,
+                photos,
+                request.ActivityPhotos,
+                cancellationToken);
             EnsureStepRequirements(
                 status,
                 updateStepRequirement.RequirePhoto,
                 updateStepRequirement.RequireComment,
-                photos,
+                hasStepPhotoEvidence,
                 usageNotes,
                 request.ActivityNote);
 
@@ -849,17 +906,33 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 }
             }
 
+            await EnsureManufacturingPersonExistsAsync(
+                conn,
+                tx,
+                ManufacturingPersonRoles.Designer,
+                request.DesignerName ?? existing.DesignerName,
+                cancellationToken);
+            await EnsureManufacturingPersonExistsAsync(
+                conn,
+                tx,
+                ManufacturingPersonRoles.Craftsman,
+                request.CraftsmanName ?? existing.CraftsmanName,
+                cancellationToken);
+
             if (gemstonesForSave is not null)
             {
                 await ReplaceProjectGemstonesAsync(conn, tx, projectId, gemstonesForSave, cancellationToken);
             }
 
             var statusChanged = !string.Equals(existing.Status, status, StringComparison.OrdinalIgnoreCase);
-            if (statusChanged || !string.IsNullOrWhiteSpace(request.ActivityNote))
+            var hasActivityPhotos = HasAnyText(request.ActivityPhotos);
+            if (statusChanged || !string.IsNullOrWhiteSpace(request.ActivityNote) || hasActivityPhotos)
             {
                 var activityNote = !string.IsNullOrWhiteSpace(request.ActivityNote)
                     ? request.ActivityNote.Trim()
-                    : $"Status changed from {existing.Status} to {status}";
+                    : statusChanged
+                        ? $"Status changed from {existing.Status} to {status}"
+                        : $"Added step evidence for {status}";
 
                 await InsertActivityLogAsync(
                     conn,
@@ -868,6 +941,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                     status,
                     request.CraftsmanName ?? existing.CraftsmanName,
                     activityNote,
+                    request.ActivityPhotos,
                     cancellationToken);
             }
 
@@ -893,6 +967,216 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
 
         var rows = await cmd.ExecuteNonQueryAsync(cancellationToken);
         return rows > 0;
+    }
+
+    public async Task<IReadOnlyList<ManufacturingPersonResponse>> GetManufacturingPeopleAsync(
+        string? role,
+        bool activeOnly,
+        CancellationToken cancellationToken = default)
+    {
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+        return await GetManufacturingPeopleInternalAsync(conn, null, role, activeOnly, cancellationToken);
+    }
+
+    public async Task<ManufacturingPersonResponse> CreateManufacturingPersonAsync(
+        ManufacturingPersonUpsertRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedRole = NormalizeManufacturingPersonRole(request.Role);
+        var normalizedName = NormalizeRequired(request.Name, "Name is required.");
+        var isActive = request.IsActive ?? true;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_people", cancellationToken))
+        {
+            throw new InvalidOperationException("manufacturing_people table not found. Apply the latest migration.");
+        }
+
+        const string sql = """
+            INSERT INTO dbo.manufacturing_people (
+                role,
+                name,
+                email,
+                phone,
+                is_active,
+                updated_at_utc
+            )
+            OUTPUT INSERTED.id
+            VALUES (
+                @Role,
+                @Name,
+                @Email,
+                @Phone,
+                @IsActive,
+                SYSUTCDATETIME()
+            );
+            """;
+
+        int createdId;
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            cmd.Parameters.AddWithValue("@Role", normalizedRole);
+            cmd.Parameters.AddWithValue("@Name", normalizedName);
+            cmd.Parameters.AddWithValue("@Email", DbNullIfEmpty(request.Email));
+            cmd.Parameters.AddWithValue("@Phone", DbNullIfEmpty(request.Phone));
+            cmd.Parameters.AddWithValue("@IsActive", isActive);
+            createdId = Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken) ?? 0);
+        }
+
+        var created = await GetManufacturingPersonByIdAsync(conn, null, createdId, cancellationToken);
+        if (created is null)
+        {
+            throw new InvalidOperationException("Person was created but could not be loaded.");
+        }
+
+        return created;
+    }
+
+    public async Task<ManufacturingPersonResponse?> UpdateManufacturingPersonAsync(
+        int personId,
+        ManufacturingPersonUpsertRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_people", cancellationToken))
+        {
+            return null;
+        }
+
+        var existing = await GetManufacturingPersonByIdAsync(conn, null, personId, cancellationToken);
+        if (existing is null)
+        {
+            return null;
+        }
+
+        var role = string.IsNullOrWhiteSpace(request.Role) ? existing.Role : NormalizeManufacturingPersonRole(request.Role);
+        var name = string.IsNullOrWhiteSpace(request.Name) ? existing.Name : NormalizeRequired(request.Name, "Name is required.");
+        var isActive = request.IsActive ?? existing.IsActive;
+
+        const string sql = """
+            UPDATE dbo.manufacturing_people
+            SET
+                role = @Role,
+                name = @Name,
+                email = @Email,
+                phone = @Phone,
+                is_active = @IsActive,
+                updated_at_utc = SYSUTCDATETIME()
+            WHERE id = @PersonId;
+            """;
+
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            cmd.Parameters.AddWithValue("@PersonId", personId);
+            cmd.Parameters.AddWithValue("@Role", role);
+            cmd.Parameters.AddWithValue("@Name", name);
+            cmd.Parameters.AddWithValue("@Email", request.Email is null ? DbNullIfEmpty(existing.Email) : DbNullIfEmpty(request.Email));
+            cmd.Parameters.AddWithValue("@Phone", request.Phone is null ? DbNullIfEmpty(existing.Phone) : DbNullIfEmpty(request.Phone));
+            cmd.Parameters.AddWithValue("@IsActive", isActive);
+            var rows = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            if (rows <= 0)
+            {
+                return null;
+            }
+        }
+
+        return await GetManufacturingPersonByIdAsync(conn, null, personId, cancellationToken);
+    }
+
+    public async Task<bool> DeleteManufacturingPersonAsync(int personId, CancellationToken cancellationToken = default)
+    {
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_people", cancellationToken))
+        {
+            return false;
+        }
+
+        const string sql = "DELETE FROM dbo.manufacturing_people WHERE id = @PersonId;";
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@PersonId", personId);
+        var rows = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        return rows > 0;
+    }
+
+    public async Task<ManufacturingPersonProfileResponse?> GetManufacturingPersonProfileAsync(
+        int personId,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        limit = Math.Clamp(limit, 1, 300);
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_people", cancellationToken))
+        {
+            return null;
+        }
+
+        var person = await GetManufacturingPersonByIdAsync(conn, null, personId, cancellationToken);
+        if (person is null)
+        {
+            return null;
+        }
+
+        var sql = $"""
+            SELECT TOP (@Limit)
+                mp.id,
+                mp.manufacturing_code,
+                mp.piece_name,
+                mp.piece_type,
+                mp.design_date,
+                mp.designer_name,
+                mp.status,
+                mp.craftsman_name,
+                mp.metal_plating_json,
+                mp.setting_cost,
+                mp.diamond_cost,
+                mp.gemstone_cost,
+                mp.total_cost,
+                mp.selling_price,
+                mp.completion_date,
+                mp.customer_id,
+                mp.sold_at,
+                mp.created_at_utc,
+                mp.updated_at_utc,
+                mp.custom_fields_json,
+                c.name AS customer_name,
+                (
+                    SELECT COUNT(*)
+                    FROM dbo.manufacturing_project_gemstones mg
+                    WHERE mg.project_id = mp.id
+                ) AS gemstone_count
+            FROM dbo.manufacturing_projects mp
+            LEFT JOIN dbo.customers c
+                ON c.id = mp.customer_id
+            WHERE {(person.Role == ManufacturingPersonRoles.Designer ? "mp.designer_name = @PersonName" : "mp.craftsman_name = @PersonName")}
+            ORDER BY mp.updated_at_utc DESC, mp.id DESC;
+            """;
+
+        var projects = new List<ManufacturingProjectSummaryResponse>();
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@Limit", limit);
+        cmd.Parameters.AddWithValue("@PersonName", person.Name);
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            projects.Add(MapManufacturingSummary(reader));
+        }
+
+        return new ManufacturingPersonProfileResponse
+        {
+            Person = person,
+            Projects = projects
+        };
     }
 
     public async Task<ManufacturingSettingsResponse> GetManufacturingSettingsAsync(CancellationToken cancellationToken = default)
@@ -926,10 +1210,30 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(cancellationToken);
 
+        var designers = await GetManufacturingPeopleInternalAsync(
+            conn,
+            null,
+            ManufacturingPersonRoles.Designer,
+            activeOnly: true,
+            cancellationToken);
+        var craftsmen = await GetManufacturingPeopleInternalAsync(
+            conn,
+            null,
+            ManufacturingPersonRoles.Craftsman,
+            activeOnly: true,
+            cancellationToken);
+
         if (!await TableExistsAsync(conn, "dbo.manufacturing_process_steps", cancellationToken) ||
             !await TableExistsAsync(conn, "dbo.manufacturing_custom_fields", cancellationToken))
         {
-            return BuildDefaultSettings();
+            var defaults = BuildDefaultSettings();
+            return new ManufacturingSettingsResponse
+            {
+                Steps = defaults.Steps,
+                Fields = defaults.Fields,
+                Designers = designers,
+                Craftsmen = craftsmen
+            };
         }
 
         var steps = new List<ManufacturingProcessStepResponse>();
@@ -972,13 +1276,22 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
 
         if (steps.Count == 0 && fields.Count == 0)
         {
-            return BuildDefaultSettings();
+            var defaults = BuildDefaultSettings();
+            return new ManufacturingSettingsResponse
+            {
+                Steps = defaults.Steps,
+                Fields = defaults.Fields,
+                Designers = designers,
+                Craftsmen = craftsmen
+            };
         }
 
         return new ManufacturingSettingsResponse
         {
             Steps = steps,
-            Fields = fields
+            Fields = fields,
+            Designers = designers,
+            Craftsmen = craftsmen
         };
     }
 
@@ -1397,11 +1710,11 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         string status,
         bool requirePhoto,
         bool requireComment,
-        IReadOnlyList<string>? photos,
+        bool hasPhotoEvidence,
         string? usageNotes,
         string? activityNote)
     {
-        if (requirePhoto && (photos is null || !photos.Any(photo => !string.IsNullOrWhiteSpace(photo))))
+        if (requirePhoto && !hasPhotoEvidence)
         {
             throw new ArgumentException($"Status '{status}' requires at least one photo.");
         }
@@ -1410,6 +1723,226 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         {
             throw new ArgumentException($"Status '{status}' requires a comment or note.");
         }
+    }
+
+    private static bool HasAnyText(IReadOnlyList<string>? values)
+    {
+        return values is not null && values.Any(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    private async Task<bool> HasStepPhotoEvidenceAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        int projectId,
+        string status,
+        IReadOnlyList<string>? projectPhotos,
+        IReadOnlyList<string>? activityPhotos,
+        CancellationToken cancellationToken)
+    {
+        if (HasAnyText(activityPhotos) || HasAnyText(projectPhotos))
+        {
+            return true;
+        }
+
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_activity_log", cancellationToken, tx) ||
+            !await ColumnExistsAsync(conn, "dbo.manufacturing_activity_log", "photos_json", cancellationToken, tx))
+        {
+            return false;
+        }
+
+        const string sql = """
+            SELECT COUNT(*)
+            FROM dbo.manufacturing_activity_log
+            WHERE project_id = @ProjectId
+              AND status = @Status
+              AND photos_json IS NOT NULL
+              AND LTRIM(RTRIM(photos_json)) NOT IN ('', '[]', 'null');
+            """;
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@ProjectId", projectId);
+        cmd.Parameters.AddWithValue("@Status", ManufacturingStatuses.NormalizeOrDefault(status));
+        var result = Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken) ?? 0);
+        return result > 0;
+    }
+
+    private async Task EnsureManufacturingPersonExistsAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string role,
+        string? name,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return;
+        }
+
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_people", cancellationToken, tx))
+        {
+            return;
+        }
+
+        var normalizedRole = NormalizeManufacturingPersonRole(role);
+        var normalizedName = name.Trim();
+
+        const string existsSql = """
+            SELECT TOP 1 id
+            FROM dbo.manufacturing_people
+            WHERE role = @Role
+              AND name = @Name;
+            """;
+
+        await using (var existsCmd = new SqlCommand(existsSql, conn, tx))
+        {
+            existsCmd.Parameters.AddWithValue("@Role", normalizedRole);
+            existsCmd.Parameters.AddWithValue("@Name", normalizedName);
+            var existingId = await existsCmd.ExecuteScalarAsync(cancellationToken);
+            if (existingId is not null && existingId != DBNull.Value)
+            {
+                return;
+            }
+        }
+
+        const string insertSql = """
+            INSERT INTO dbo.manufacturing_people (
+                role,
+                name,
+                email,
+                phone,
+                is_active,
+                updated_at_utc
+            )
+            VALUES (
+                @Role,
+                @Name,
+                NULL,
+                NULL,
+                1,
+                SYSUTCDATETIME()
+            );
+            """;
+
+        await using var insertCmd = new SqlCommand(insertSql, conn, tx);
+        insertCmd.Parameters.AddWithValue("@Role", normalizedRole);
+        insertCmd.Parameters.AddWithValue("@Name", normalizedName);
+        await insertCmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static string NormalizeManufacturingPersonRole(string? value)
+    {
+        var normalized = ManufacturingPersonRoles.NormalizeOrDefault(value, string.Empty);
+        return normalized switch
+        {
+            ManufacturingPersonRoles.Designer => ManufacturingPersonRoles.Designer,
+            ManufacturingPersonRoles.Craftsman => ManufacturingPersonRoles.Craftsman,
+            _ => throw new ArgumentException("Role must be either 'designer' or 'craftsman'.")
+        };
+    }
+
+    private static string? NormalizeManufacturingPersonRoleOrNull(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        if (normalized == "all")
+        {
+            return null;
+        }
+
+        return NormalizeManufacturingPersonRole(normalized);
+    }
+
+    private async Task<IReadOnlyList<ManufacturingPersonResponse>> GetManufacturingPeopleInternalAsync(
+        SqlConnection conn,
+        SqlTransaction? tx,
+        string? role,
+        bool activeOnly,
+        CancellationToken cancellationToken)
+    {
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_people", cancellationToken, tx))
+        {
+            return [];
+        }
+
+        var normalizedRole = NormalizeManufacturingPersonRoleOrNull(role);
+        var filters = new List<string>();
+        if (!string.IsNullOrWhiteSpace(normalizedRole))
+        {
+            filters.Add("role = @Role");
+        }
+        if (activeOnly)
+        {
+            filters.Add("is_active = 1");
+        }
+
+        var whereClause = filters.Count == 0 ? string.Empty : $"WHERE {string.Join(" AND ", filters)}";
+        var sql = $"""
+            SELECT
+                id,
+                role,
+                name,
+                email,
+                phone,
+                is_active,
+                created_at_utc,
+                updated_at_utc
+            FROM dbo.manufacturing_people
+            {whereClause}
+            ORDER BY
+                CASE WHEN role = 'designer' THEN 0 ELSE 1 END,
+                name ASC,
+                id ASC;
+            """;
+
+        var items = new List<ManufacturingPersonResponse>();
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        if (!string.IsNullOrWhiteSpace(normalizedRole))
+        {
+            cmd.Parameters.AddWithValue("@Role", normalizedRole);
+        }
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(MapManufacturingPerson(reader));
+        }
+
+        return items;
+    }
+
+    private static async Task<ManufacturingPersonResponse?> GetManufacturingPersonByIdAsync(
+        SqlConnection conn,
+        SqlTransaction? tx,
+        int personId,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT
+                id,
+                role,
+                name,
+                email,
+                phone,
+                is_active,
+                created_at_utc,
+                updated_at_utc
+            FROM dbo.manufacturing_people
+            WHERE id = @PersonId;
+            """;
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@PersonId", personId);
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return MapManufacturingPerson(reader);
     }
 
     private static bool IsSystemField(string key)
@@ -1469,6 +2002,21 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         const string sql = "SELECT CASE WHEN OBJECT_ID(@TableName, 'U') IS NULL THEN 0 ELSE 1 END;";
         await using var cmd = new SqlCommand(sql, conn, tx);
         cmd.Parameters.AddWithValue("@TableName", tableName);
+        var result = await cmd.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt32(result ?? 0) == 1;
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SqlConnection conn,
+        string tableName,
+        string columnName,
+        CancellationToken cancellationToken,
+        SqlTransaction? tx = null)
+    {
+        const string sql = "SELECT CASE WHEN COL_LENGTH(@TableName, @ColumnName) IS NULL THEN 0 ELSE 1 END;";
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@TableName", tableName);
+        cmd.Parameters.AddWithValue("@ColumnName", columnName);
         var result = await cmd.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt32(result ?? 0) == 1;
     }
@@ -1774,37 +2322,62 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         }
     }
 
-    private static async Task InsertActivityLogAsync(
+    private async Task InsertActivityLogAsync(
         SqlConnection conn,
         SqlTransaction tx,
         int projectId,
         string status,
         string? craftsmanName,
         string notes,
+        IReadOnlyList<string>? photos,
         CancellationToken cancellationToken)
     {
-        const string sql = """
-            INSERT INTO dbo.manufacturing_activity_log (
-                project_id,
-                status,
-                activity_at_utc,
-                craftsman_name,
-                notes
-            )
-            VALUES (
-                @ProjectId,
-                @Status,
-                SYSUTCDATETIME(),
-                @CraftsmanName,
-                @Notes
-            );
-            """;
+        var hasPhotosColumn = await ColumnExistsAsync(conn, "dbo.manufacturing_activity_log", "photos_json", cancellationToken, tx);
+        var sql = hasPhotosColumn
+            ? """
+                INSERT INTO dbo.manufacturing_activity_log (
+                    project_id,
+                    status,
+                    activity_at_utc,
+                    craftsman_name,
+                    notes,
+                    photos_json
+                )
+                VALUES (
+                    @ProjectId,
+                    @Status,
+                    SYSUTCDATETIME(),
+                    @CraftsmanName,
+                    @Notes,
+                    @PhotosJson
+                );
+                """
+            : """
+                INSERT INTO dbo.manufacturing_activity_log (
+                    project_id,
+                    status,
+                    activity_at_utc,
+                    craftsman_name,
+                    notes
+                )
+                VALUES (
+                    @ProjectId,
+                    @Status,
+                    SYSUTCDATETIME(),
+                    @CraftsmanName,
+                    @Notes
+                );
+                """;
 
         await using var cmd = new SqlCommand(sql, conn, tx);
         cmd.Parameters.AddWithValue("@ProjectId", projectId);
         cmd.Parameters.AddWithValue("@Status", ManufacturingStatuses.NormalizeOrDefault(status));
         cmd.Parameters.AddWithValue("@CraftsmanName", DbNullIfEmpty(craftsmanName));
         cmd.Parameters.AddWithValue("@Notes", DbNullIfEmpty(notes));
+        if (hasPhotosColumn)
+        {
+            cmd.Parameters.AddWithValue("@PhotosJson", SerializeJsonArray(photos));
+        }
 
         await cmd.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -1826,6 +2399,21 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             UpdatedAtUtc = GetDateTime(reader, "updated_at_utc"),
             TotalSpent = GetDecimal(reader, "total_spent"),
             PurchaseCount = GetInt32(reader, "purchase_count"),
+        };
+    }
+
+    private static ManufacturingPersonResponse MapManufacturingPerson(SqlDataReader reader)
+    {
+        return new ManufacturingPersonResponse
+        {
+            Id = GetInt32(reader, "id"),
+            Role = ManufacturingPersonRoles.NormalizeOrDefault(GetString(reader, "role"), ManufacturingPersonRoles.Designer),
+            Name = GetString(reader, "name"),
+            Email = GetNullableString(reader, "email"),
+            Phone = GetNullableString(reader, "phone"),
+            IsActive = GetBoolean(reader, "is_active"),
+            CreatedAtUtc = GetDateTime(reader, "created_at_utc"),
+            UpdatedAtUtc = GetDateTime(reader, "updated_at_utc")
         };
     }
 

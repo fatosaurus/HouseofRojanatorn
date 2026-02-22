@@ -19,6 +19,9 @@ import type {
   ManufacturingActivityLog,
   ManufacturingGemstone,
   ManufacturingNoteParseResponse,
+  ManufacturingPerson,
+  ManufacturingPersonProfile,
+  ManufacturingPersonUpsertRequest,
   ManufacturingProjectDetail,
   ManufacturingProjectSummary,
   ManufacturingProcessStep,
@@ -361,7 +364,33 @@ function mapManufacturingActivity(record: UnknownRecord): ManufacturingActivityL
     status: readString(record, 'status', 'Status') ?? '',
     activityAtUtc: readString(record, 'activityAtUtc', 'ActivityAtUtc') ?? '',
     craftsmanName: readString(record, 'craftsmanName', 'CraftsmanName'),
-    notes: readString(record, 'notes', 'Notes')
+    notes: readString(record, 'notes', 'Notes'),
+    photos: readStringArray(record, 'photos', 'Photos')
+  }
+}
+
+function mapManufacturingPerson(record: UnknownRecord): ManufacturingPerson {
+  const rawRole = (readString(record, 'role', 'Role') ?? '').toLowerCase()
+  return {
+    id: readNumber(record, 'id', 'Id') ?? 0,
+    role: rawRole === 'craftsman' ? 'craftsman' : 'designer',
+    name: readString(record, 'name', 'Name') ?? '',
+    email: readString(record, 'email', 'Email'),
+    phone: readString(record, 'phone', 'Phone'),
+    isActive: Boolean(pick<unknown>(record, 'isActive', 'IsActive')),
+    createdAtUtc: readString(record, 'createdAtUtc', 'CreatedAtUtc') ?? '',
+    updatedAtUtc: readString(record, 'updatedAtUtc', 'UpdatedAtUtc') ?? ''
+  }
+}
+
+function mapManufacturingPersonProfile(record: UnknownRecord): ManufacturingPersonProfile {
+  const rawPerson = pick<UnknownRecord>(record, 'person', 'Person') ?? {}
+  const rawProjects = pick<unknown[]>(record, 'projects', 'Projects') ?? []
+  return {
+    person: mapManufacturingPerson(rawPerson),
+    projects: rawProjects
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(mapManufacturingSummary)
   }
 }
 
@@ -457,6 +486,8 @@ function mapManufacturingField(record: UnknownRecord): ManufacturingCustomField 
 function mapManufacturingSettings(record: UnknownRecord): ManufacturingSettings {
   const rawSteps = pick<unknown[]>(record, 'steps', 'Steps') ?? []
   const rawFields = pick<unknown[]>(record, 'fields', 'Fields') ?? []
+  const rawDesigners = pick<unknown[]>(record, 'designers', 'Designers') ?? []
+  const rawCraftsmen = pick<unknown[]>(record, 'craftsmen', 'Craftsmen') ?? []
 
   return {
     steps: rawSteps
@@ -464,7 +495,13 @@ function mapManufacturingSettings(record: UnknownRecord): ManufacturingSettings 
       .map(mapManufacturingStep),
     fields: rawFields
       .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
-      .map(mapManufacturingField)
+      .map(mapManufacturingField),
+    designers: rawDesigners
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(mapManufacturingPerson),
+    craftsmen: rawCraftsmen
+      .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+      .map(mapManufacturingPerson)
   }
 }
 
@@ -782,6 +819,47 @@ export async function updateManufacturingSettings(payload: ManufacturingSettings
     body: JSON.stringify(payload)
   })
   return mapManufacturingSettings(response)
+}
+
+export async function getManufacturingPeople(role?: 'designer' | 'craftsman' | 'all', activeOnly = true): Promise<ManufacturingPerson[]> {
+  const params = new URLSearchParams()
+  if (role && role !== 'all') {
+    params.set('role', role)
+  }
+  params.set('activeOnly', activeOnly ? 'true' : 'false')
+
+  const suffix = params.toString() ? `?${params}` : ''
+  const response = await fetchJson<unknown[]>(`${env.apiBaseUrl}/manufacturing/people${suffix}`)
+  return response
+    .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+    .map(mapManufacturingPerson)
+}
+
+export async function createManufacturingPerson(payload: ManufacturingPersonUpsertRequest): Promise<ManufacturingPerson> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing/people`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+  return mapManufacturingPerson(response)
+}
+
+export async function updateManufacturingPerson(id: number, payload: ManufacturingPersonUpsertRequest): Promise<ManufacturingPerson> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing/people/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  })
+  return mapManufacturingPerson(response)
+}
+
+export async function deleteManufacturingPerson(id: number): Promise<void> {
+  await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing/people/${id}`, {
+    method: 'DELETE'
+  })
+}
+
+export async function getManufacturingPersonProfile(id: number, limit = 200): Promise<ManufacturingPersonProfile> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/manufacturing/people/${id}?limit=${limit}`)
+  return mapManufacturingPersonProfile(response)
 }
 
 export async function parseManufacturingNote(noteText: string): Promise<ManufacturingNoteParseResponse> {

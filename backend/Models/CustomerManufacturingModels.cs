@@ -70,6 +70,34 @@ public static class ManufacturingPieceTypes
     }
 }
 
+public static class ManufacturingPersonRoles
+{
+    public const string Designer = "designer";
+    public const string Craftsman = "craftsman";
+
+    public static string NormalizeOrDefault(string? value, string fallback = Designer)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return fallback;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            Designer => Designer,
+            Craftsman => Craftsman,
+            _ => fallback
+        };
+    }
+
+    public static bool IsValid(string? value)
+    {
+        var normalized = NormalizeOrDefault(value, string.Empty);
+        return normalized == Designer || normalized == Craftsman;
+    }
+}
+
 public sealed class CustomerResponse
 {
     public Guid Id { get; init; }
@@ -135,6 +163,7 @@ public sealed class ManufacturingActivityLogResponse
     public DateTime ActivityAtUtc { get; init; }
     public string? CraftsmanName { get; init; }
     public string? Notes { get; init; }
+    public IReadOnlyList<string> Photos { get; init; } = [];
 }
 
 public sealed class ManufacturingProjectSummaryResponse
@@ -227,7 +256,35 @@ public sealed class ManufacturingProjectUpsertRequest
     public DateTime? SoldAt { get; init; }
     public IReadOnlyList<ManufacturingGemstoneUpsertRequest>? Gemstones { get; init; }
     public string? ActivityNote { get; init; }
+    public IReadOnlyList<string>? ActivityPhotos { get; init; }
     public IReadOnlyDictionary<string, string?>? CustomFields { get; init; }
+}
+
+public sealed class ManufacturingPersonResponse
+{
+    public int Id { get; init; }
+    public string Role { get; init; } = ManufacturingPersonRoles.Designer;
+    public string Name { get; init; } = string.Empty;
+    public string? Email { get; init; }
+    public string? Phone { get; init; }
+    public bool IsActive { get; init; }
+    public DateTime CreatedAtUtc { get; init; }
+    public DateTime UpdatedAtUtc { get; init; }
+}
+
+public sealed class ManufacturingPersonUpsertRequest
+{
+    public string? Role { get; init; }
+    public string? Name { get; init; }
+    public string? Email { get; init; }
+    public string? Phone { get; init; }
+    public bool? IsActive { get; init; }
+}
+
+public sealed class ManufacturingPersonProfileResponse
+{
+    public ManufacturingPersonResponse Person { get; init; } = new();
+    public IReadOnlyList<ManufacturingProjectSummaryResponse> Projects { get; init; } = [];
 }
 
 public sealed class ManufacturingProcessStepResponse
@@ -256,6 +313,8 @@ public sealed class ManufacturingSettingsResponse
 {
     public IReadOnlyList<ManufacturingProcessStepResponse> Steps { get; init; } = [];
     public IReadOnlyList<ManufacturingCustomFieldResponse> Fields { get; init; } = [];
+    public IReadOnlyList<ManufacturingPersonResponse> Designers { get; init; } = [];
+    public IReadOnlyList<ManufacturingPersonResponse> Craftsmen { get; init; } = [];
 }
 
 public sealed class ManufacturingProcessStepUpsertRequest
