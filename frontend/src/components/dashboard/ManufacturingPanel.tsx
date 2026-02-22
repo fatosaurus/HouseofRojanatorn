@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Check, Expand, Pencil, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   createManufacturingProject,
@@ -153,8 +154,54 @@ function buildDraft(defaultStatus: string, fields: ManufacturingCustomField[]): 
   }
 }
 
+function roundCurrency(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0
+  }
+
+  return Math.round(value * 100) / 100
+}
+
+function calculateGemstoneCost(gemstones: ManufacturingGemstoneUpsertRequest[]): number {
+  const total = gemstones.reduce((sum, gemstone) => sum + (gemstone.lineCost ?? 0), 0)
+  return roundCurrency(total)
+}
+
+function mapDetailToDraft(detail: ManufacturingProjectDetail, fields: ManufacturingCustomField[]): ProjectDraft {
+  const customFields: Record<string, string> = {}
+  for (const field of fields) {
+    if (!field.isSystem && field.isActive) {
+      customFields[field.fieldKey] = detail.customFields[field.fieldKey] ?? ''
+    }
+  }
+
+  return {
+    manufacturingCode: detail.manufacturingCode,
+    pieceName: detail.pieceName,
+    pieceType: detail.pieceType ?? 'other',
+    status: detail.status,
+    designerName: detail.designerName ?? '',
+    craftsmanName: detail.craftsmanName ?? '',
+    sellingPrice: String(detail.sellingPrice),
+    totalCost: String(detail.totalCost),
+    metalPlating: detail.metalPlating.join(', '),
+    usageNotes: detail.usageNotes ?? '',
+    photosText: detail.photos.join('\n'),
+    gemstones: detail.gemstones.map(gem => ({
+      inventoryItemId: gem.inventoryItemId,
+      gemstoneCode: gem.gemstoneCode,
+      gemstoneType: gem.gemstoneType,
+      piecesUsed: gem.piecesUsed,
+      weightUsedCt: gem.weightUsedCt,
+      lineCost: gem.lineCost,
+      notes: gem.notes
+    })),
+    customFields
+  }
+}
+
 function parseManufacturingRoute(pathname: string): {
-  mode: 'list' | 'create' | 'detail'
+  mode: 'list' | 'create' | 'detail' | 'edit'
   detailId: number | null
   isFull: boolean
   isInvalid: boolean
@@ -185,16 +232,34 @@ function parseManufacturingRoute(pathname: string): {
     return { mode: 'list', detailId: null, isFull: false, isInvalid: true }
   }
 
-  if (fullSegment && fullSegment !== 'full') {
-    return { mode: 'detail', detailId, isFull: false, isInvalid: true }
+  if (!fullSegment) {
+    return {
+      mode: 'detail',
+      detailId,
+      isFull: false,
+      isInvalid: parts.length > 3
+    }
   }
 
-  return {
-    mode: 'detail',
-    detailId,
-    isFull: fullSegment === 'full',
-    isInvalid: parts.length > 4
+  if (fullSegment === 'full') {
+    return {
+      mode: 'detail',
+      detailId,
+      isFull: true,
+      isInvalid: parts.length > 4
+    }
   }
+
+  if (fullSegment === 'edit') {
+    return {
+      mode: 'edit',
+      detailId,
+      isFull: false,
+      isInvalid: parts.length > 4
+    }
+  }
+
+  return { mode: 'detail', detailId, isFull: false, isInvalid: true }
 }
 
 interface DetailContentProps {
@@ -360,6 +425,7 @@ export function ManufacturingPanel() {
 
   const [createMode, setCreateMode] = useState<'upload' | 'manual'>('upload')
   const [draft, setDraft] = useState<ProjectDraft>(() => buildDraft('approved', []))
+  const [editDraft, setEditDraft] = useState<ProjectDraft>(() => buildDraft('approved', []))
   const [isSaving, setIsSaving] = useState(false)
 
   const [noteFile, setNoteFile] = useState<File | null>(null)
@@ -439,6 +505,9 @@ export function ManufacturingPanel() {
     return labels
   }, [activeFields])
 
+  const draftGemstoneCost = useMemo(() => calculateGemstoneCost(draft.gemstones), [draft.gemstones])
+  const editGemstoneCost = useMemo(() => calculateGemstoneCost(editDraft.gemstones), [editDraft.gemstones])
+
   async function loadRecords(currentSearch: string, currentStatus: string) {
     setIsLoading(true)
     setError(null)
@@ -488,7 +557,7 @@ export function ManufacturingPanel() {
   }, [activeFields, defaultStatus, route.mode])
 
   useEffect(() => {
-    if (route.mode !== 'detail' || !route.detailId) {
+    if ((route.mode !== 'detail' && route.mode !== 'edit') || !route.detailId) {
       setSelected(null)
       setSelectedStatus('')
       setIsLoadingDetail(false)
@@ -504,6 +573,9 @@ export function ManufacturingPanel() {
         if (!cancelled) {
           setSelected(detail)
           setSelectedStatus(detail.status)
+          if (route.mode === 'edit') {
+            setEditDraft(mapDetailToDraft(detail, activeFields))
+          }
         }
       })
       .catch(() => {
@@ -522,7 +594,7 @@ export function ManufacturingPanel() {
     return () => {
       cancelled = true
     }
-  }, [route.detailId, route.mode])
+  }, [activeFields, route.detailId, route.mode])
 
   async function analyzeNote() {
     if (!noteFile) {
@@ -535,7 +607,12 @@ export function ManufacturingPanel() {
 
     try {
       const ocrRuntime = await ensureOcrRuntime()
-      const worker = await ocrRuntime.createWorker('eng')
+      let worker: OcrWorker
+      try {
+        worker = await ocrRuntime.createWorker('eng+tha')
+      } catch {
+        worker = await ocrRuntime.createWorker('eng')
+      }
       const result = await worker.recognize(noteFile)
       await worker.terminate()
 
@@ -565,6 +642,51 @@ export function ManufacturingPanel() {
     } finally {
       setIsAnalyzing(false)
     }
+  }
+
+  function addGemstoneRow(setter: (updater: (current: ProjectDraft) => ProjectDraft) => void) {
+    setter(current => ({
+      ...current,
+      gemstones: [
+        ...current.gemstones,
+        {
+          inventoryItemId: null,
+          gemstoneCode: null,
+          gemstoneType: null,
+          piecesUsed: null,
+          weightUsedCt: null,
+          lineCost: null,
+          notes: null
+        }
+      ]
+    }))
+  }
+
+  function removeGemstoneRow(setter: (updater: (current: ProjectDraft) => ProjectDraft) => void, index: number) {
+    setter(current => ({
+      ...current,
+      gemstones: current.gemstones.filter((_, currentIndex) => currentIndex !== index)
+    }))
+  }
+
+  function updateGemstoneRow(
+    setter: (updater: (current: ProjectDraft) => ProjectDraft) => void,
+    index: number,
+    patch: Partial<ManufacturingGemstoneUpsertRequest>
+  ) {
+    setter(current => ({
+      ...current,
+      gemstones: current.gemstones.map((gemstone, currentIndex) => {
+        if (currentIndex !== index) {
+          return gemstone
+        }
+
+        return {
+          ...gemstone,
+          ...patch
+        }
+      })
+    }))
   }
 
   async function handleCreate() {
@@ -669,12 +791,109 @@ export function ManufacturingPanel() {
     }
   }
 
+  async function handleSaveEdit() {
+    if (!selected) {
+      return
+    }
+
+    if (!editDraft.manufacturingCode.trim() || !editDraft.pieceName.trim()) {
+      setError('Manufacturing code and piece name are required.')
+      return
+    }
+
+    const photos = parsePhotos(editDraft.photosText)
+    const selectedStepRequirements = stepRequirementsByStatus[editDraft.status]
+    if (selectedStepRequirements?.requirePhoto && photos.length === 0) {
+      setError(`Photo upload is required for ${labelize(editDraft.status)}.`)
+      return
+    }
+
+    if (selectedStepRequirements?.requireComment && !editDraft.usageNotes.trim()) {
+      setError(`A comment is required for ${labelize(editDraft.status)}.`)
+      return
+    }
+
+    setIsSaving(true)
+    setError(null)
+
+    try {
+      const payloadCustomFields: Record<string, string | null> = {}
+      for (const [key, value] of Object.entries(editDraft.customFields)) {
+        payloadCustomFields[key] = value.trim() || null
+      }
+
+      const payloadGemstones = editDraft.gemstones
+        .map(gem => ({
+          inventoryItemId: gem.inventoryItemId ?? null,
+          gemstoneCode: gem.gemstoneCode?.trim() || null,
+          gemstoneType: gem.gemstoneType?.trim() || null,
+          piecesUsed: typeof gem.piecesUsed === 'number' && Number.isFinite(gem.piecesUsed) ? gem.piecesUsed : null,
+          weightUsedCt: typeof gem.weightUsedCt === 'number' && Number.isFinite(gem.weightUsedCt) ? gem.weightUsedCt : null,
+          lineCost: typeof gem.lineCost === 'number' && Number.isFinite(gem.lineCost) ? gem.lineCost : null,
+          notes: gem.notes?.trim() || null
+        }))
+        .filter(gem =>
+          gem.inventoryItemId != null ||
+          gem.gemstoneCode != null ||
+          gem.gemstoneType != null ||
+          (gem.piecesUsed ?? 0) > 0 ||
+          (gem.weightUsedCt ?? 0) > 0)
+
+      const updated = await updateManufacturingProject(selected.id, {
+        manufacturingCode: editDraft.manufacturingCode.trim(),
+        pieceName: editDraft.pieceName.trim(),
+        pieceType: editDraft.pieceType,
+        status: editDraft.status,
+        designerName: editDraft.designerName.trim() || null,
+        craftsmanName: editDraft.craftsmanName.trim() || null,
+        sellingPrice: Number(editDraft.sellingPrice) || 0,
+        totalCost: Number(editDraft.totalCost) || 0,
+        metalPlating: editDraft.metalPlating
+          .split(',')
+          .map(item => item.trim())
+          .filter(item => item.length > 0),
+        usageNotes: editDraft.usageNotes.trim() || null,
+        photos,
+        gemstones: payloadGemstones,
+        customFields: payloadCustomFields,
+        activityNote: 'Project details updated from edit panel'
+      })
+
+      setSelected(updated)
+      setSelectedStatus(updated.status)
+      setEditDraft(mapDetailToDraft(updated, activeFields))
+      await loadRecords(search, statusFilter)
+      navigate(`/dashboard/manufacturing/${updated.id}`)
+    } catch {
+      setError('Unable to save manufacturing project changes.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   function openDetail(projectId: number) {
     navigate(`/dashboard/manufacturing/${projectId}`)
   }
 
   function closeDetail() {
     navigate('/dashboard/manufacturing')
+  }
+
+  function openEdit() {
+    if (!route.detailId) {
+      return
+    }
+
+    navigate(`/dashboard/manufacturing/${route.detailId}/edit`)
+  }
+
+  function closeEdit() {
+    if (!route.detailId) {
+      navigate('/dashboard/manufacturing')
+      return
+    }
+
+    navigate(`/dashboard/manufacturing/${route.detailId}`)
   }
 
   function openFullDetail() {
@@ -877,6 +1096,10 @@ export function ManufacturingPanel() {
               <input type="number" value={draft.sellingPrice} onChange={event => setDraft(current => ({ ...current, sellingPrice: event.target.value }))} />
             </label>
             <label>
+              Gemstone Cost (Calculated)
+              <input value={formatCurrency(draftGemstoneCost)} readOnly />
+            </label>
+            <label>
               Total Cost (THB)
               <input type="number" value={draft.totalCost} onChange={event => setDraft(current => ({ ...current, totalCost: event.target.value }))} />
             </label>
@@ -893,19 +1116,80 @@ export function ManufacturingPanel() {
               <textarea rows={4} value={draft.usageNotes} onChange={event => setDraft(current => ({ ...current, usageNotes: event.target.value }))} />
             </label>
 
-            {draft.gemstones.length > 0 ? (
-              <div className="crm-form-span usage-lines">
-                <h4>Parsed Gemstones ({draft.gemstones.length})</h4>
+            <div className="crm-form-span usage-lines">
+              <div className="card-head">
+                <h4>Gemstones ({draft.gemstones.length})</h4>
+                <button type="button" className="secondary-btn" onClick={() => addGemstoneRow(setDraft)}>
+                  <Plus size={14} />
+                  Add Gemstone
+                </button>
+              </div>
+              <p className="panel-placeholder">Line costs and gemstone cost are calculated from inventory pricing when you save.</p>
+              {draft.gemstones.length === 0 ? (
+                <p className="panel-placeholder">
+                  Add gemstone rows manually or parse from uploaded note.
+                </p>
+              ) : (
                 <div className="activity-list">
                   {draft.gemstones.map((gem, index) => (
                     <article key={`${gem.gemstoneCode ?? 'gem'}-${index}`}>
-                      <p><strong>{gem.gemstoneCode ?? '-'}</strong> • {gem.gemstoneType ?? '-'}</p>
-                      <p>{gem.piecesUsed ?? 0} pcs / {gem.weightUsedCt ?? 0} ct • {formatCurrency(gem.lineCost ?? 0)}</p>
+                      <div className="gemstone-row-grid">
+                        <label>
+                          Code
+                          <input
+                            value={gem.gemstoneCode ?? ''}
+                            onChange={event => updateGemstoneRow(setDraft, index, { gemstoneCode: event.target.value || null })}
+                          />
+                        </label>
+                        <label>
+                          Type
+                          <input
+                            value={gem.gemstoneType ?? ''}
+                            onChange={event => updateGemstoneRow(setDraft, index, { gemstoneType: event.target.value || null })}
+                          />
+                        </label>
+                        <label>
+                          Pieces
+                          <input
+                            type="number"
+                            value={gem.piecesUsed ?? ''}
+                            onChange={event => updateGemstoneRow(setDraft, index, {
+                              piecesUsed: event.target.value === '' ? null : Number(event.target.value)
+                            })}
+                          />
+                        </label>
+                        <label>
+                          Weight (CT)
+                          <input
+                            type="number"
+                            value={gem.weightUsedCt ?? ''}
+                            onChange={event => updateGemstoneRow(setDraft, index, {
+                              weightUsedCt: event.target.value === '' ? null : Number(event.target.value)
+                            })}
+                          />
+                        </label>
+                        <label>
+                          Line Cost (Calculated)
+                          <input value={formatCurrency(gem.lineCost ?? 0)} readOnly />
+                        </label>
+                        <label>
+                          Notes
+                          <input
+                            value={gem.notes ?? ''}
+                            onChange={event => updateGemstoneRow(setDraft, index, { notes: event.target.value || null })}
+                          />
+                        </label>
+                      </div>
+                      <div className="crm-form-actions">
+                        <button type="button" className="secondary-btn" onClick={() => removeGemstoneRow(setDraft, index)}>
+                          Remove
+                        </button>
+                      </div>
                     </article>
                   ))}
                 </div>
-              </div>
-            ) : null}
+              )}
+            </div>
 
             <div className="crm-form-actions crm-form-span">
               <button type="button" className="secondary-btn" onClick={() => setCreateMode('upload')}>
@@ -915,11 +1199,201 @@ export function ManufacturingPanel() {
                 Reset
               </button>
               <button type="button" className="primary-btn" onClick={() => void handleCreate()} disabled={isSaving || isLoadingSettings}>
+                <Check size={14} />
                 {isSaving ? 'Saving...' : 'Save Project'}
               </button>
             </div>
           </div>
         ) : null}
+      </section>
+    )
+  }
+
+  if (route.mode === 'edit') {
+    return (
+      <section className="content-card content-card-full">
+        <div className="card-head">
+          <div>
+            <h3>Edit Manufacturing Project</h3>
+            <p>Update project metadata, gemstones, and workflow details.</p>
+          </div>
+          <div className="detail-actions-row">
+            <button type="button" className="icon-btn" onClick={closeEdit} aria-label="Close edit mode" title="Close edit mode">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {error ? <p className="error-banner">{error}</p> : null}
+
+        {isLoadingDetail ? (
+          <p className="panel-placeholder">Loading manufacturing detail...</p>
+        ) : selected ? (
+          <div className="crm-form-grid">
+            <label>
+              Manufacturing Code
+              <input value={editDraft.manufacturingCode} onChange={event => setEditDraft(current => ({ ...current, manufacturingCode: event.target.value }))} />
+            </label>
+            <label>
+              Piece Name
+              <input value={editDraft.pieceName} onChange={event => setEditDraft(current => ({ ...current, pieceName: event.target.value }))} />
+            </label>
+            <label>
+              Piece Type
+              <select value={editDraft.pieceType} onChange={event => setEditDraft(current => ({ ...current, pieceType: event.target.value }))}>
+                {PIECE_TYPES.map(type => (
+                  <option key={type} value={type}>{labelize(type)}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Status
+              <select value={editDraft.status} onChange={event => setEditDraft(current => ({ ...current, status: event.target.value }))}>
+                {statusOptions.map(status => (
+                  <option key={status} value={status}>{labelize(status)}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Designer
+              <input value={editDraft.designerName} onChange={event => setEditDraft(current => ({ ...current, designerName: event.target.value }))} />
+            </label>
+            <label>
+              Craftsman
+              <input value={editDraft.craftsmanName} onChange={event => setEditDraft(current => ({ ...current, craftsmanName: event.target.value }))} />
+            </label>
+
+            {Object.entries(editDraft.customFields).map(([fieldKey, value]) => (
+              <label key={fieldKey}>
+                {customFieldLabels[fieldKey] ?? labelize(fieldKey)}
+                <input
+                  value={value}
+                  onChange={event => {
+                    const nextValue = event.target.value
+                    setEditDraft(current => ({
+                      ...current,
+                      customFields: {
+                        ...current.customFields,
+                        [fieldKey]: nextValue
+                      }
+                    }))
+                  }}
+                />
+              </label>
+            ))}
+
+            <label>
+              Selling Price (THB)
+              <input type="number" value={editDraft.sellingPrice} onChange={event => setEditDraft(current => ({ ...current, sellingPrice: event.target.value }))} />
+            </label>
+            <label>
+              Gemstone Cost (Calculated)
+              <input value={formatCurrency(editGemstoneCost)} readOnly />
+            </label>
+            <label>
+              Total Cost (THB)
+              <input type="number" value={editDraft.totalCost} onChange={event => setEditDraft(current => ({ ...current, totalCost: event.target.value }))} />
+            </label>
+            <label className="crm-form-span">
+              Metal Plating (comma separated)
+              <input value={editDraft.metalPlating} onChange={event => setEditDraft(current => ({ ...current, metalPlating: event.target.value }))} />
+            </label>
+            <label className="crm-form-span">
+              Photos (URL or identifier, comma/new line separated)
+              <textarea rows={2} value={editDraft.photosText} onChange={event => setEditDraft(current => ({ ...current, photosText: event.target.value }))} />
+            </label>
+            <label className="crm-form-span">
+              Notes
+              <textarea rows={4} value={editDraft.usageNotes} onChange={event => setEditDraft(current => ({ ...current, usageNotes: event.target.value }))} />
+            </label>
+
+            <div className="crm-form-span usage-lines">
+              <div className="card-head">
+                <h4>Gemstones ({editDraft.gemstones.length})</h4>
+                <button type="button" className="secondary-btn" onClick={() => addGemstoneRow(setEditDraft)}>
+                  <Plus size={14} />
+                  Add Gemstone
+                </button>
+              </div>
+              <p className="panel-placeholder">Line costs and gemstone cost are calculated from inventory pricing when you save.</p>
+              {editDraft.gemstones.length === 0 ? (
+                <p className="panel-placeholder">No gemstone rows. Add one to calculate gemstone cost from inventory pricing.</p>
+              ) : (
+                <div className="activity-list">
+                  {editDraft.gemstones.map((gem, index) => (
+                    <article key={`${gem.gemstoneCode ?? 'gem'}-${index}`}>
+                      <div className="gemstone-row-grid">
+                        <label>
+                          Code
+                          <input
+                            value={gem.gemstoneCode ?? ''}
+                            onChange={event => updateGemstoneRow(setEditDraft, index, { gemstoneCode: event.target.value || null })}
+                          />
+                        </label>
+                        <label>
+                          Type
+                          <input
+                            value={gem.gemstoneType ?? ''}
+                            onChange={event => updateGemstoneRow(setEditDraft, index, { gemstoneType: event.target.value || null })}
+                          />
+                        </label>
+                        <label>
+                          Pieces
+                          <input
+                            type="number"
+                            value={gem.piecesUsed ?? ''}
+                            onChange={event => updateGemstoneRow(setEditDraft, index, {
+                              piecesUsed: event.target.value === '' ? null : Number(event.target.value)
+                            })}
+                          />
+                        </label>
+                        <label>
+                          Weight (CT)
+                          <input
+                            type="number"
+                            value={gem.weightUsedCt ?? ''}
+                            onChange={event => updateGemstoneRow(setEditDraft, index, {
+                              weightUsedCt: event.target.value === '' ? null : Number(event.target.value)
+                            })}
+                          />
+                        </label>
+                        <label>
+                          Line Cost (Calculated)
+                          <input value={formatCurrency(gem.lineCost ?? 0)} readOnly />
+                        </label>
+                        <label>
+                          Notes
+                          <input
+                            value={gem.notes ?? ''}
+                            onChange={event => updateGemstoneRow(setEditDraft, index, { notes: event.target.value || null })}
+                          />
+                        </label>
+                      </div>
+                      <div className="crm-form-actions">
+                        <button type="button" className="secondary-btn" onClick={() => removeGemstoneRow(setEditDraft, index)}>
+                          Remove
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="crm-form-actions crm-form-span">
+              <button type="button" className="secondary-btn" onClick={closeEdit} disabled={isSaving}>
+                Cancel
+              </button>
+              <button type="button" className="primary-btn" onClick={() => void handleSaveEdit()} disabled={isSaving || isLoadingSettings}>
+                <Check size={14} />
+                {isSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="panel-placeholder">No manufacturing detail found for edit mode.</p>
+        )}
       </section>
     )
   }
@@ -940,6 +1414,7 @@ export function ManufacturingPanel() {
             setNoteFile(null)
           }}
         >
+          <Plus size={14} />
           New Project
         </button>
       </div>
@@ -1004,11 +1479,14 @@ export function ManufacturingPanel() {
             <p>Full page view for one project record.</p>
           </div>
           <div className="detail-actions-row">
-            <button type="button" className="secondary-btn" onClick={closeFullDetail}>
-              Back To Split View
+            <button type="button" className="icon-btn" onClick={openEdit} aria-label="Edit project" title="Edit project">
+              <Pencil size={18} />
             </button>
-            <button type="button" className="secondary-btn" onClick={closeDetail}>
-              Back To Table
+            <button type="button" className="icon-btn" onClick={closeFullDetail} aria-label="Back to split view" title="Back to split view">
+              <Expand size={18} />
+            </button>
+            <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail view" title="Close detail view">
+              <X size={18} />
             </button>
           </div>
         </div>
@@ -1046,11 +1524,14 @@ export function ManufacturingPanel() {
           <div className="drawer-head">
             <h3>Manufacturing Detail</h3>
             <div className="detail-actions-row">
-              <button type="button" className="secondary-btn" onClick={openFullDetail}>
-                Full Screen
+              <button type="button" className="icon-btn" onClick={openEdit} aria-label="Edit project" title="Edit project">
+                <Pencil size={18} />
               </button>
-              <button type="button" className="secondary-btn" onClick={closeDetail}>
-                Close
+              <button type="button" className="icon-btn" onClick={openFullDetail} aria-label="Open full screen" title="Open full screen">
+                <Expand size={18} />
+              </button>
+              <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail panel" title="Close detail panel">
+                <X size={18} />
               </button>
             </div>
           </div>

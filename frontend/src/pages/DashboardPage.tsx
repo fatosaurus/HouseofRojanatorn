@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, BarChart3, ChevronLeft, ChevronRight, Expand, Factory, Gem, History, LogOut, Settings, ShoppingBag, UserCog, Users, X } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getInventoryItem, getInventoryItems, getInventorySummary, getUsageBatches } from '../api/client'
 import type { InventoryItem, InventoryItemDetail, InventorySummary } from '../api/types'
@@ -24,15 +26,15 @@ const DASHBOARD_TABS: DashboardTab[] = [
   'settings'
 ]
 
-const SIDEBAR_ITEMS: Array<{ tab: DashboardTab, label: string, short: string, glyph: string }> = [
-  { tab: 'customers', label: 'Customers', short: 'CU', glyph: 'C' },
-  { tab: 'purchases', label: 'Purchases', short: 'PU', glyph: 'P' },
-  { tab: 'inventory', label: 'Gemstones', short: 'GE', glyph: 'G' },
-  { tab: 'manufacturing', label: 'Manufacturing', short: 'MF', glyph: 'M' },
-  { tab: 'history', label: 'History', short: 'HI', glyph: 'H' },
-  { tab: 'analytics', label: 'Analytics', short: 'AN', glyph: 'A' },
-  { tab: 'users', label: 'Users', short: 'US', glyph: 'U' },
-  { tab: 'settings', label: 'Settings', short: 'SE', glyph: 'S' }
+const SIDEBAR_ITEMS: Array<{ tab: DashboardTab, label: string, Icon: LucideIcon }> = [
+  { tab: 'customers', label: 'Customers', Icon: Users },
+  { tab: 'purchases', label: 'Purchases', Icon: ShoppingBag },
+  { tab: 'inventory', label: 'Gemstones', Icon: Gem },
+  { tab: 'manufacturing', label: 'Manufacturing', Icon: Factory },
+  { tab: 'history', label: 'History', Icon: History },
+  { tab: 'analytics', label: 'Analytics', Icon: BarChart3 },
+  { tab: 'users', label: 'Users', Icon: UserCog },
+  { tab: 'settings', label: 'Settings', Icon: Settings }
 ]
 
 function resolveDashboardTab(segment: string | undefined): DashboardTab | null {
@@ -645,16 +647,17 @@ export function DashboardPage() {
             aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            {isSidebarCollapsed ? '›' : '‹'}
+            {isSidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
           </button>
         </div>
 
         <nav className="sidebar-nav">
           {SIDEBAR_ITEMS.map(item => (
             <button key={item.tab} type="button" className={activeTab === item.tab ? 'active' : ''} onClick={() => goToTab(item.tab)}>
-              <span className="nav-glyph" aria-hidden="true">{item.glyph}</span>
+              <span className="nav-glyph" aria-hidden="true">
+                <item.Icon size={16} />
+              </span>
               <span className="label-full">{item.label}</span>
-              <span className="label-short">{item.short}</span>
             </button>
           ))}
         </nav>
@@ -665,9 +668,8 @@ export function DashboardPage() {
         </section>
 
         <button type="button" className="sidebar-signout" onClick={signOut}>
-          <span className="nav-glyph" aria-hidden="true">O</span>
+          <span className="nav-glyph" aria-hidden="true"><LogOut size={16} /></span>
           <span className="label-full">Sign Out</span>
-          <span className="label-short">SO</span>
         </button>
       </aside>
 
@@ -718,11 +720,11 @@ export function DashboardPage() {
                   <p>Full page gemstone detail and activity trail.</p>
                 </div>
                 <div className="detail-actions-row">
-                  <button type="button" className="secondary-btn" onClick={closeInventoryFullDetail}>
-                    Back To Split View
+                  <button type="button" className="icon-btn" onClick={closeInventoryFullDetail} aria-label="Back to split view" title="Back to split view">
+                    <ArrowLeft size={18} />
                   </button>
-                  <button type="button" className="secondary-btn" onClick={closeInventoryDetail}>
-                    Back To Table
+                  <button type="button" className="icon-btn" onClick={closeInventoryDetail} aria-label="Close detail view" title="Close detail view">
+                    <X size={18} />
                   </button>
                 </div>
               </div>
@@ -746,11 +748,11 @@ export function DashboardPage() {
                   <div className="drawer-head">
                     <h3>Gemstone Detail</h3>
                     <div className="detail-actions-row">
-                      <button type="button" className="secondary-btn" onClick={openInventoryFullDetail}>
-                        Full Screen
+                      <button type="button" className="icon-btn" onClick={openInventoryFullDetail} aria-label="Open full screen" title="Open full screen">
+                        <Expand size={18} />
                       </button>
-                      <button type="button" className="secondary-btn" onClick={closeInventoryDetail}>
-                        Close
+                      <button type="button" className="icon-btn" onClick={closeInventoryDetail} aria-label="Close detail panel" title="Close detail panel">
+                        <X size={18} />
                       </button>
                     </div>
                   </div>

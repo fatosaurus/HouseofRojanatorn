@@ -1,5 +1,6 @@
 using System.Net;
 using System.Security.Claims;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using backend.Models;
@@ -433,6 +434,13 @@ public sealed class CustomerManufacturingFunctions
         var craftsmanName = FindLabeledValue(lines, ["craftsman", "maker", "craft by"]);
         var pieceName = FindLabeledValue(lines, ["piece", "item", "product"]);
         var pieceType = DetectPieceType(normalized);
+        var gemstones = ParseGemstoneLines(lines, out var gemstoneLineIndexes);
+        var usageNotes = BuildUsageNotes(lines, gemstoneLineIndexes);
+
+        if (string.IsNullOrWhiteSpace(pieceName))
+        {
+            pieceName = GuessPieceName(lines, manufacturingCode, pieceType);
+        }
 
         if (string.IsNullOrWhiteSpace(pieceName))
         {
@@ -440,9 +448,11 @@ public sealed class CustomerManufacturingFunctions
         }
 
         decimal? sellingPrice = TryExtractMoney(normalized, ["selling", "sale", "sell"]);
-        decimal? totalCost = TryExtractMoney(normalized, ["total cost", "cost"]);
-
-        var gemstones = ParseGemstoneLines(lines);
+        decimal? totalCost = TryExtractMoney(normalized, ["total cost", "cost", "budget"]);
+        if (!totalCost.HasValue && gemstones.Count > 0)
+        {
+            totalCost = gemstones.Sum(item => item.LineCost ?? 0m);
+        }
 
         return new ManufacturingNoteParseResponse
         {
@@ -452,11 +462,49 @@ public sealed class CustomerManufacturingFunctions
             Status = ManufacturingStatuses.NormalizeOrDefault(defaultStatus),
             DesignerName = designerName,
             CraftsmanName = craftsmanName,
-            UsageNotes = normalized,
+            UsageNotes = usageNotes,
             TotalCost = totalCost,
             SellingPrice = sellingPrice,
             Gemstones = gemstones
         };
+    }
+
+    private static string? GuessPieceName(IReadOnlyList<string> lines, string manufacturingCode, string? pieceType)
+    {
+        foreach (var line in lines)
+        {
+            if (line.Length < 6)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(manufacturingCode) &&
+                line.Contains(manufacturingCode, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (LooksLikeGemstoneRow(line))
+            {
+                continue;
+            }
+
+            if (IsNonGemHeaderLine(line) ||
+                Regex.IsMatch(line, @"^gem\s*(use|usage)\b", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(line, @"^(total|code|price|qty|amount|budget)\b", RegexOptions.IgnoreCase))
+            {
+                continue;
+            }
+
+            if (!Regex.IsMatch(line, @"[A-Za-z]", RegexOptions.CultureInvariant))
+            {
+                continue;
+            }
+
+            return line;
+        }
+
+        return pieceType is null ? null : $"{pieceType} from note";
     }
 
     private static string? FindLabeledValue(IEnumerable<string> lines, IEnumerable<string> labels)
@@ -506,58 +554,287 @@ public sealed class CustomerManufacturingFunctions
     {
         foreach (var label in labels)
         {
-            var match = Regex.Match(text, $"{Regex.Escape(label)}\\s*[:\\-]?\\s*([\\d,]+(?:\\.\\d+)?)", RegexOptions.IgnoreCase);
-            if (match.Success && decimal.TryParse(match.Groups[1].Value.Replace(",", ""), out var value))
+            var match = Regex.Match(
+                text,
+                $@"\b{Regex.Escape(label)}\b\s*[:\-]?\s*(?<value>[\d,]+(?:\.\d+)?)",
+                RegexOptions.IgnoreCase);
+            if (match.Success)
             {
-                return value;
+                var parsed = ParseDecimal(match.Groups["value"].Value);
+                if (parsed.HasValue)
+                {
+                    return parsed;
+                }
             }
         }
 
         return null;
     }
 
-    private static IReadOnlyList<ManufacturingGemstoneUpsertRequest> ParseGemstoneLines(IEnumerable<string> lines)
+    private static IReadOnlyList<ManufacturingGemstoneUpsertRequest> ParseGemstoneLines(
+        IReadOnlyList<string> lines,
+        out HashSet<int> matchedLineIndexes)
     {
+        matchedLineIndexes = [];
         var results = new List<ManufacturingGemstoneUpsertRequest>();
-        var regex = new Regex(
-            @"^(?<code>[A-Z0-9\-#]{2,})?(?:\s+)?(?<type>[A-Za-z][A-Za-z0-9\s\-]{1,40})?(?:\s+)?(?:(?<pcs>\d+(?:\.\d+)?)\s*pcs?)?(?:\s+)?(?:(?<ct>\d+(?:\.\d+)?)\s*ct)?(?:\s+)?(?:(?<cost>\d+(?:,\d{3})*(?:\.\d+)?)\s*(?:thb|baht)?)?$",
-            RegexOptions.IgnoreCase);
-
-        foreach (var line in lines)
+        for (var index = 0; index < lines.Count; index++)
         {
-            if (line.Length < 3)
+            var line = NormalizeNoteLine(lines[index]);
+            if (line.Length < 3 || IsNonGemHeaderLine(line))
             {
                 continue;
             }
 
-            var match = regex.Match(line);
-            if (!match.Success)
+            if (!LooksLikeGemstoneRow(line))
             {
                 continue;
             }
 
-            var code = match.Groups["code"].Value.Trim();
-            var type = match.Groups["type"].Value.Trim();
+            var candidate = line;
+            var consumedNextLine = false;
+            if (!HasGemstoneSignals(candidate) && index + 1 < lines.Count)
+            {
+                var nextLine = NormalizeNoteLine(lines[index + 1]);
+                if (!LooksLikeGemstoneRow(nextLine) && !IsNonGemHeaderLine(nextLine) && nextLine.Length > 0)
+                {
+                    var merged = $"{candidate} {nextLine}";
+                    if (HasGemstoneSignals(merged))
+                    {
+                        candidate = merged;
+                        consumedNextLine = true;
+                    }
+                }
+            }
 
-            if (string.IsNullOrWhiteSpace(code) && string.IsNullOrWhiteSpace(type))
+            var parsedRow = ParseGemstoneRow(candidate);
+            if (parsedRow is null)
             {
                 continue;
             }
 
-            _ = decimal.TryParse(match.Groups["pcs"].Value, out var pcs);
-            _ = decimal.TryParse(match.Groups["ct"].Value, out var ct);
-            _ = decimal.TryParse(match.Groups["cost"].Value.Replace(",", ""), out var cost);
-
-            results.Add(new ManufacturingGemstoneUpsertRequest
+            results.Add(parsedRow);
+            matchedLineIndexes.Add(index);
+            if (consumedNextLine)
             {
-                GemstoneCode = string.IsNullOrWhiteSpace(code) ? null : code,
-                GemstoneType = string.IsNullOrWhiteSpace(type) ? null : type,
-                PiecesUsed = pcs > 0 ? pcs : null,
-                WeightUsedCt = ct > 0 ? ct : null,
-                LineCost = cost > 0 ? cost : null
-            });
+                matchedLineIndexes.Add(index + 1);
+                index++;
+            }
         }
 
         return results;
+    }
+
+    private static ManufacturingGemstoneUpsertRequest? ParseGemstoneRow(string normalizedLine)
+    {
+        var codeMatch = Regex.Match(normalizedLine, @"^\s*#?(?<code>[A-Z]{0,3}\d{3,8}[A-Z]?)\b", RegexOptions.IgnoreCase);
+        if (!codeMatch.Success)
+        {
+            return null;
+        }
+
+        var code = codeMatch.Groups["code"].Value.Trim();
+        var remainder = normalizedLine[codeMatch.Length..].Trim();
+        if (remainder.Length == 0 || !HasGemstoneSignals(remainder))
+        {
+            return null;
+        }
+
+        var priceMatch = Regex.Match(
+            remainder,
+            @"(?<value>\d+(?:\.\d+)?)\s*/\s*(?<unit>ct|carat|pcs?|pc|piece)\b",
+            RegexOptions.IgnoreCase);
+        var pricePerUnit = ParseDecimal(priceMatch.Groups["value"].Value);
+        var priceUnit = priceMatch.Groups["unit"].Value.Trim().ToLowerInvariant();
+
+        decimal? pieces = ParseDecimal(Regex.Match(remainder, @"\((?<value>\d+(?:\.\d+)?)\)").Groups["value"].Value);
+        if (!pieces.HasValue)
+        {
+            pieces = ParseDecimal(Regex.Match(remainder, @"(?<value>\d+(?:\.\d+)?)\s*pcs?\b", RegexOptions.IgnoreCase).Groups["value"].Value);
+        }
+
+        decimal? weightCt = ParseDecimal(
+            Regex.Match(
+                remainder,
+                @"\d+(?:\.\d+)?\s*[-–]\s*\d+(?:\.\d+)?\s*=\s*(?<value>\d+(?:\.\d+)?)\s*ct?\b",
+                RegexOptions.IgnoreCase).Groups["value"].Value);
+        if (!weightCt.HasValue)
+        {
+            weightCt = ParseDecimal(Regex.Match(remainder, @"=\s*(?<value>\d+(?:\.\d+)?)\s*ct?\b", RegexOptions.IgnoreCase).Groups["value"].Value);
+        }
+
+        if (!weightCt.HasValue)
+        {
+            var ctMatches = Regex.Matches(remainder, @"(?<value>\d+(?:\.\d+)?)\s*ct\b", RegexOptions.IgnoreCase);
+            if (ctMatches.Count > 0)
+            {
+                weightCt = ParseDecimal(ctMatches[^1].Groups["value"].Value);
+            }
+        }
+
+        var multiplicationMatch = Regex.Match(
+            remainder,
+            @"(?<qty>\d+(?:\.\d+)?)\s*[x*×]\s*(?<rate>\d+(?:\.\d+)?)\s*=\s*(?<value>\d+(?:\.\d+)?)",
+            RegexOptions.IgnoreCase);
+
+        decimal? lineCost = ParseDecimal(multiplicationMatch.Groups["value"].Value);
+        if (!lineCost.HasValue)
+        {
+            lineCost = ParseDecimal(Regex.Match(remainder, @"=\s*(?<value>\d+(?:\.\d+)?)\s*$").Groups["value"].Value);
+        }
+
+        if (!lineCost.HasValue && pricePerUnit.HasValue)
+        {
+            if ((priceUnit.StartsWith("ct", StringComparison.OrdinalIgnoreCase) || priceUnit.StartsWith("carat", StringComparison.OrdinalIgnoreCase)) && weightCt.HasValue)
+            {
+                lineCost = decimal.Round(pricePerUnit.Value * weightCt.Value, 2, MidpointRounding.AwayFromZero);
+            }
+            else if (
+                (priceUnit.StartsWith("pc", StringComparison.OrdinalIgnoreCase) || priceUnit.StartsWith("piece", StringComparison.OrdinalIgnoreCase)) &&
+                pieces.HasValue)
+            {
+                lineCost = decimal.Round(pricePerUnit.Value * pieces.Value, 2, MidpointRounding.AwayFromZero);
+            }
+        }
+
+        if (!pieces.HasValue && multiplicationMatch.Success && priceUnit.StartsWith("pc", StringComparison.OrdinalIgnoreCase))
+        {
+            pieces = ParseDecimal(multiplicationMatch.Groups["qty"].Value);
+        }
+
+        if (!weightCt.HasValue && multiplicationMatch.Success &&
+            (priceUnit.StartsWith("ct", StringComparison.OrdinalIgnoreCase) || priceUnit.StartsWith("carat", StringComparison.OrdinalIgnoreCase)))
+        {
+            weightCt = ParseDecimal(multiplicationMatch.Groups["qty"].Value);
+        }
+
+        var typeText = remainder;
+        if (priceMatch.Success)
+        {
+            typeText = remainder[..priceMatch.Index].Trim();
+        }
+        else if (multiplicationMatch.Success)
+        {
+            typeText = remainder[..multiplicationMatch.Index].Trim();
+        }
+
+        typeText = Regex.Replace(typeText, @"\s+", " ").Trim('-', ':', '|', ' ');
+        if (string.IsNullOrWhiteSpace(typeText))
+        {
+            typeText = null;
+        }
+
+        if (!pieces.HasValue && !weightCt.HasValue && !lineCost.HasValue && string.IsNullOrWhiteSpace(typeText))
+        {
+            return null;
+        }
+
+        return new ManufacturingGemstoneUpsertRequest
+        {
+            GemstoneCode = string.IsNullOrWhiteSpace(code) ? null : code,
+            GemstoneType = typeText,
+            PiecesUsed = pieces > 0 ? pieces : null,
+            WeightUsedCt = weightCt > 0 ? weightCt : null,
+            LineCost = lineCost > 0 ? lineCost : null
+        };
+    }
+
+    private static string? BuildUsageNotes(IReadOnlyList<string> lines, ISet<int> gemstoneLineIndexes)
+    {
+        var noteLines = new List<string>();
+        for (var index = 0; index < lines.Count; index++)
+        {
+            if (gemstoneLineIndexes.Contains(index))
+            {
+                continue;
+            }
+
+            var line = lines[index].Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            if (IsNonGemHeaderLine(line) ||
+                Regex.IsMatch(line, @"^(total|sum|code|price)\b", RegexOptions.IgnoreCase))
+            {
+                continue;
+            }
+
+            if (LooksLikeGemstoneRow(line) && HasGemstoneSignals(line))
+            {
+                continue;
+            }
+
+            noteLines.Add(line);
+        }
+
+        if (noteLines.Count == 0)
+        {
+            return null;
+        }
+
+        return string.Join(" | ", noteLines.Take(5));
+    }
+
+    private static bool IsNonGemHeaderLine(string line)
+    {
+        var normalized = NormalizeNoteLine(line);
+        if (normalized.Length == 0)
+        {
+            return true;
+        }
+
+        return Regex.IsMatch(
+            normalized,
+            @"^(gem\s*(use|usage)|code\b|price\b|qty\b|quantity\b|unit\b|amount\b|description\b|total\b|grand total\b)",
+            RegexOptions.IgnoreCase);
+    }
+
+    private static bool LooksLikeGemstoneRow(string line)
+    {
+        var normalized = NormalizeNoteLine(line);
+        return Regex.IsMatch(normalized, @"^\s*#?[A-Z]{0,3}\d{3,8}[A-Z]?\b", RegexOptions.IgnoreCase);
+    }
+
+    private static bool HasGemstoneSignals(string line)
+    {
+        return Regex.IsMatch(line, @"\bct\b|\bcarat\b|\bpcs?\b|\bpiece\b|/\s*(ct|carat|pcs?|pc|piece)\b", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(line, @"\d+(?:\.\d+)?\s*[-–]\s*\d+(?:\.\d+)?\s*=", RegexOptions.IgnoreCase) ||
+            Regex.IsMatch(line, @"\d+(?:\.\d+)?\s*[x*×]\s*\d+(?:\.\d+)?", RegexOptions.IgnoreCase) ||
+            line.Contains('=');
+    }
+
+    private static string NormalizeNoteLine(string line)
+    {
+        return Regex
+            .Replace(
+                line
+                    .Replace('|', ' ')
+                    .Replace('\t', ' ')
+                    .Replace('×', 'x'),
+                @"\s+",
+                " ")
+            .Trim();
+    }
+
+    private static decimal? ParseDecimal(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var sanitized = value.Replace(",", string.Empty).Trim();
+        if (decimal.TryParse(sanitized, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return parsed;
+        }
+
+        if (decimal.TryParse(sanitized, NumberStyles.Number, CultureInfo.CurrentCulture, out parsed))
+        {
+            return parsed;
+        }
+
+        return null;
     }
 }
