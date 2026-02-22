@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Eye, Plus, Save, Trash2, UserRound, Wrench, X } from 'lucide-react'
+import { Eye, Plus, Save, Trash2, UserRound, Users, Wrench, X } from 'lucide-react'
 import {
   createManufacturingPerson,
   deleteManufacturingPerson,
+  deleteUser,
   getManufacturingPersonProfile,
   getManufacturingSettings,
+  inviteUser,
+  listUsers,
   updateManufacturingPerson,
   updateManufacturingSettings
 } from '../../api/client'
@@ -12,7 +15,8 @@ import type {
   ManufacturingCustomField,
   ManufacturingPerson,
   ManufacturingPersonProfile,
-  ManufacturingProcessStep
+  ManufacturingProcessStep,
+  UserSummary
 } from '../../api/types'
 import { useSession } from '../../app/useSession'
 
@@ -24,8 +28,8 @@ function slugify(value: string): string {
 }
 
 const FIELD_TYPES: ManufacturingCustomField['fieldType'][] = ['text', 'textarea', 'number', 'date', 'select']
-
 type WorkforceRole = 'designer' | 'craftsman'
+type SettingsSection = 'profile' | 'users' | 'designers' | 'craftsmen' | 'steps' | 'fields'
 
 interface EditablePerson {
   id: number
@@ -70,10 +74,12 @@ function formatDate(raw: string | null | undefined): string {
     return raw
   }
 
-  return parsed.toLocaleDateString('en-GB', {
+  return parsed.toLocaleString('en-GB', {
     day: '2-digit',
     month: 'short',
-    year: 'numeric'
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
   })
 }
 
@@ -85,23 +91,111 @@ function formatCurrency(value: number): string {
   }).format(value)
 }
 
+function initialsFromEmail(email: string): string {
+  const local = email.split('@')[0] ?? ''
+  const parts = local
+    .replace(/[._-]+/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+
+  if (parts.length === 0) {
+    return 'U'
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase()
+  }
+
+  return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
+}
+
+function displayNameFromEmail(email: string): string {
+  const local = email.split('@')[0] ?? ''
+  const parts = local
+    .replace(/[._-]+/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+
+  if (parts.length === 0) {
+    return 'User'
+  }
+
+  return parts.join(' ')
+}
+
 export function SettingsPanel() {
-  const { role } = useSession()
+  const { role, email } = useSession()
+  const [activeSection, setActiveSection] = useState<SettingsSection>('profile')
+
   const [steps, setSteps] = useState<ManufacturingProcessStep[]>([])
   const [fields, setFields] = useState<ManufacturingCustomField[]>([])
   const [designers, setDesigners] = useState<EditablePerson[]>([])
   const [craftsmen, setCraftsmen] = useState<EditablePerson[]>([])
   const [deletedPersonIds, setDeletedPersonIds] = useState<number[]>([])
 
+  const [users, setUsers] = useState<UserSummary[]>([])
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member')
+  const [inviteDays, setInviteDays] = useState('7')
+  const [latestInviteToken, setLatestInviteToken] = useState<string | null>(null)
+
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true)
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isSavingUsers, setIsSavingUsers] = useState(false)
+
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
   const [profile, setProfile] = useState<ManufacturingPersonProfile | null>(null)
-  const [isLoadingProfile, setIsLoadingProfile] = useState(false)
 
   const isAdmin = role === 'admin'
+
+  const inviteLink = useMemo(() => {
+    if (!latestInviteToken) {
+      return null
+    }
+
+    return `${window.location.origin}/accept-invite?token=${encodeURIComponent(latestInviteToken)}`
+  }, [latestInviteToken])
+
+  const pageIdentity = useMemo(() => {
+    return {
+      initials: initialsFromEmail(email),
+      name: displayNameFromEmail(email),
+      email,
+      role: role === 'admin' ? 'Admin' : 'Member'
+    }
+  }, [email, role])
+
+  const sectionConfig: Record<SettingsSection, { title: string, subtitle: string }> = {
+    profile: {
+      title: 'Profile',
+      subtitle: 'Manage your own account details visible across the platform.'
+    },
+    users: {
+      title: 'Users',
+      subtitle: 'Invite teammates and control account access.'
+    },
+    designers: {
+      title: 'Designers',
+      subtitle: 'Manage designers and view all pieces linked to each profile.'
+    },
+    craftsmen: {
+      title: 'Craftsmen',
+      subtitle: 'Manage craftsmen and review production output by person.'
+    },
+    steps: {
+      title: 'Production Steps',
+      subtitle: 'Configure stage requirements like comments and photo evidence.'
+    },
+    fields: {
+      title: 'Manufacturing Fields',
+      subtitle: 'Control dynamic fields shown on manufacturing forms.'
+    }
+  }
 
   async function loadSettings() {
     setIsLoading(true)
@@ -121,9 +215,28 @@ export function SettingsPanel() {
     }
   }
 
+  async function loadUsers() {
+    if (!isAdmin) {
+      setUsers([])
+      setIsLoadingUsers(false)
+      return
+    }
+
+    setIsLoadingUsers(true)
+    try {
+      const result = await listUsers(200)
+      setUsers(result.items)
+    } catch {
+      setError('Unable to load users.')
+    } finally {
+      setIsLoadingUsers(false)
+    }
+  }
+
   useEffect(() => {
     void loadSettings()
-  }, [])
+    void loadUsers()
+  }, [isAdmin])
 
   const activeProfileRole = useMemo(() => {
     if (!profile) {
@@ -131,6 +244,11 @@ export function SettingsPanel() {
     }
     return profile.person.role
   }, [profile])
+
+  const onManufacturingSection = activeSection === 'designers' ||
+    activeSection === 'craftsmen' ||
+    activeSection === 'steps' ||
+    activeSection === 'fields'
 
   function addStep() {
     setSteps(current => [
@@ -239,7 +357,11 @@ export function SettingsPanel() {
     }
   }
 
-  async function saveSettings() {
+  async function saveManufacturingSettings() {
+    if (!isAdmin) {
+      return
+    }
+
     setIsSaving(true)
     setError(null)
     setSuccess(null)
@@ -275,7 +397,7 @@ export function SettingsPanel() {
       await syncPeople('craftsman', craftsmen)
 
       await loadSettings()
-      setSuccess('Settings saved.')
+      setSuccess('Manufacturing settings saved.')
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : null
       setError(message || 'Unable to save settings.')
@@ -284,13 +406,478 @@ export function SettingsPanel() {
     }
   }
 
-  if (!isAdmin) {
+  async function handleInvite() {
+    if (!inviteEmail.trim()) {
+      setError('Invite email is required.')
+      return
+    }
+
+    setIsSavingUsers(true)
+    setError(null)
+
+    try {
+      const invite = await inviteUser(inviteEmail.trim().toLowerCase(), inviteRole, Number(inviteDays) || 7)
+      setLatestInviteToken(invite.token)
+      setInviteEmail('')
+      await loadUsers()
+      setSuccess('Invite created.')
+    } catch {
+      setError('Unable to create invite.')
+    } finally {
+      setIsSavingUsers(false)
+    }
+  }
+
+  async function handleDeleteUser(userId: string) {
+    if (!window.confirm('Delete this user?')) {
+      return
+    }
+
+    setIsSavingUsers(true)
+    setError(null)
+
+    try {
+      await deleteUser(userId)
+      await loadUsers()
+      setSuccess('User deleted.')
+    } catch {
+      setError('Unable to delete user.')
+    } finally {
+      setIsSavingUsers(false)
+    }
+  }
+
+  function renderProfile() {
     return (
-      <section className="content-card">
-        <h3>Settings</h3>
-        <p className="panel-placeholder">Only admin users can edit production pipeline settings.</p>
-      </section>
+      <div className="settings-profile-content">
+        <article className="settings-profile-card">
+          <h4>Account Overview</h4>
+          <p className="panel-placeholder">Your current signed-in identity and role.</p>
+
+          <div className="settings-profile-avatar">{pageIdentity.initials}</div>
+          <p className="settings-profile-name">{pageIdentity.name}</p>
+          <p className="panel-placeholder">{pageIdentity.role}</p>
+
+          <dl className="settings-profile-meta">
+            <div>
+              <dt>Primary Email</dt>
+              <dd>{pageIdentity.email}</dd>
+            </div>
+            <div>
+              <dt>Role</dt>
+              <dd>{pageIdentity.role}</dd>
+            </div>
+          </dl>
+        </article>
+
+        <article className="settings-profile-form-card">
+          <h4>Personal Information</h4>
+          <p className="panel-placeholder">Editable profile fields can be persisted in a later release.</p>
+
+          <div className="crm-form-grid settings-inline-form">
+            <label>
+              First Name
+              <input defaultValue={pageIdentity.name.split(' ')[0] ?? ''} />
+            </label>
+            <label>
+              Last Name
+              <input defaultValue={pageIdentity.name.split(' ').slice(1).join(' ')} />
+            </label>
+            <label className="crm-form-span">
+              Job Title
+              <input defaultValue={pageIdentity.role} />
+            </label>
+            <label className="crm-form-span">
+              Email Signature
+              <textarea rows={3} defaultValue={`Regards,\n${pageIdentity.name}`} />
+            </label>
+          </div>
+        </article>
+      </div>
     )
+  }
+
+  function renderUsers() {
+    if (!isAdmin) {
+      return <p className="panel-placeholder">Only admin users can manage invites and user access.</p>
+    }
+
+    return (
+      <>
+        <div className="crm-form-grid settings-inline-form">
+          <label>
+            Invite Email
+            <input value={inviteEmail} onChange={event => setInviteEmail(event.target.value)} placeholder="user@houseofrojanatorn.local" />
+          </label>
+          <label>
+            Role
+            <select value={inviteRole} onChange={event => setInviteRole(event.target.value === 'admin' ? 'admin' : 'member')}>
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <label>
+            Expires (days)
+            <input type="number" min={1} max={30} value={inviteDays} onChange={event => setInviteDays(event.target.value)} />
+          </label>
+          <div className="crm-form-actions">
+            <button type="button" className="primary-btn" onClick={() => void handleInvite()} disabled={isSavingUsers}>
+              {isSavingUsers ? 'Saving...' : 'Create Invite'}
+            </button>
+          </div>
+        </div>
+
+        {inviteLink ? (
+          <div className="usage-lines">
+            <h4>Latest Invite Link</h4>
+            <p><a href={inviteLink}>{inviteLink}</a></p>
+          </div>
+        ) : null}
+
+        {isLoadingUsers ? (
+          <p className="panel-placeholder">Loading users...</p>
+        ) : (
+          <div className="usage-table-wrap">
+            <table className="usage-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Last Login</th>
+                  <th>Invite Expires</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map(user => {
+                  const canDelete = user.email.toLowerCase() !== email.toLowerCase() && user.email.toLowerCase() !== 'admin@houseofrojanatorn.local'
+                  return (
+                    <tr key={user.id}>
+                      <td>{user.email}</td>
+                      <td>{user.role}</td>
+                      <td>{user.status}</td>
+                      <td>{formatDate(user.lastLoginAtUtc)}</td>
+                      <td>{formatDate(user.inviteExpiresAtUtc)}</td>
+                      <td>
+                        {canDelete ? (
+                          <button type="button" className="secondary-btn" onClick={() => void handleDeleteUser(user.id)} disabled={isSavingUsers}>
+                            Delete
+                          </button>
+                        ) : (
+                          '-'
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </>
+    )
+  }
+
+  function renderPeople(roleKey: WorkforceRole) {
+    const people = roleKey === 'designer' ? designers : craftsmen
+    return (
+      <>
+        <div className="card-head settings-subhead">
+          <h4>{roleKey === 'designer' ? 'Designers' : 'Craftsmen'}</h4>
+          <button type="button" className="secondary-btn" onClick={() => addPerson(roleKey)}>
+            <Plus size={14} />
+            {roleKey === 'designer' ? 'Add Designer' : 'Add Craftsman'}
+          </button>
+        </div>
+
+        <div className="usage-table-wrap">
+          <table className="usage-table workforce-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Active</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {people.map((person, index) => (
+                <tr key={`${person.id}-${index}`}>
+                  <td>
+                    <input
+                      value={person.name}
+                      placeholder={`${roleKey === 'designer' ? 'Designer' : 'Craftsman'} name`}
+                      onChange={event => updatePerson(roleKey, index, { name: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={person.email}
+                      placeholder="user@example.com"
+                      onChange={event => updatePerson(roleKey, index, { email: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={person.phone}
+                      placeholder="+66..."
+                      onChange={event => updatePerson(roleKey, index, { phone: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={person.isActive}
+                      onChange={event => updatePerson(roleKey, index, { isActive: event.target.checked })}
+                    />
+                  </td>
+                  <td>
+                    <div className="workforce-actions">
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => void openProfile(person)}
+                        disabled={person.id <= 0}
+                        aria-label="View profile"
+                        title="View profile"
+                      >
+                        <Eye size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => removePerson(roleKey, index)}
+                        aria-label="Remove"
+                        title="Remove"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+    )
+  }
+
+  function renderSteps() {
+    return (
+      <>
+        <div className="card-head settings-subhead">
+          <h4>Production Steps</h4>
+          <button type="button" className="secondary-btn" onClick={addStep}>
+            <Plus size={14} />
+            Add Step
+          </button>
+        </div>
+
+        <div className="usage-table-wrap">
+          <table className="usage-table">
+            <thead>
+              <tr>
+                <th>Step Key</th>
+                <th>Label</th>
+                <th>Photo</th>
+                <th>Comment</th>
+                <th>Active</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {steps.map((step, index) => (
+                <tr key={`${step.stepKey || 'new'}-${index}`}>
+                  <td>
+                    <input
+                      value={step.stepKey}
+                      onChange={event => {
+                        const value = event.target.value
+                        setSteps(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, stepKey: value } : item))
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={step.label}
+                      onChange={event => {
+                        const value = event.target.value
+                        setSteps(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: value } : item))
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={step.requirePhoto}
+                      onChange={event => {
+                        const checked = event.target.checked
+                        setSteps(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, requirePhoto: checked } : item))
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={step.requireComment}
+                      onChange={event => {
+                        const checked = event.target.checked
+                        setSteps(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, requireComment: checked } : item))
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={step.isActive}
+                      onChange={event => {
+                        const checked = event.target.checked
+                        setSteps(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, isActive: checked } : item))
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <button type="button" className="icon-btn" onClick={() => removeStep(index)} aria-label="Remove step" title="Remove step">
+                      <Trash2 size={15} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+    )
+  }
+
+  function renderFields() {
+    return (
+      <>
+        <div className="card-head settings-subhead">
+          <h4>Manufacturing Fields</h4>
+          <button type="button" className="secondary-btn" onClick={addField}>
+            <Plus size={14} />
+            Add Field
+          </button>
+        </div>
+
+        <div className="usage-table-wrap">
+          <table className="usage-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Label</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Active</th>
+                <th>Options</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fields.map((field, index) => (
+                <tr key={`${field.fieldKey || 'field'}-${index}`}>
+                  <td>
+                    <input
+                      value={field.fieldKey}
+                      onChange={event => {
+                        const value = event.target.value
+                        setFields(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, fieldKey: value } : item))
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={field.label}
+                      onChange={event => {
+                        const value = event.target.value
+                        setFields(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: value } : item))
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <select
+                      value={field.fieldType}
+                      onChange={event => {
+                        const value = event.target.value as ManufacturingCustomField['fieldType']
+                        setFields(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, fieldType: value } : item))
+                      }}
+                    >
+                      {FIELD_TYPES.map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={field.isRequired}
+                      onChange={event => {
+                        const checked = event.target.checked
+                        setFields(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, isRequired: checked } : item))
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={field.isActive}
+                      onChange={event => {
+                        const checked = event.target.checked
+                        setFields(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, isActive: checked } : item))
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      value={field.options.join(', ')}
+                      placeholder="A, B, C"
+                      onChange={event => {
+                        const value = event.target.value
+                        setFields(current => current.map((item, itemIndex) => itemIndex === index ? {
+                          ...item,
+                          options: value
+                            .split(',')
+                            .map(option => option.trim())
+                            .filter(option => option.length > 0)
+                        } : item))
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <button type="button" className="icon-btn" onClick={() => removeField(index)} aria-label="Remove field" title="Remove field">
+                      <Trash2 size={15} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>
+    )
+  }
+
+  function renderActiveSection() {
+    switch (activeSection) {
+      case 'profile':
+        return renderProfile()
+      case 'users':
+        return renderUsers()
+      case 'designers':
+        return renderPeople('designer')
+      case 'craftsmen':
+        return renderPeople('craftsman')
+      case 'steps':
+        return renderSteps()
+      case 'fields':
+        return renderFields()
+      default:
+        return null
+    }
   }
 
   if (isLoading) {
@@ -303,389 +890,63 @@ export function SettingsPanel() {
   }
 
   return (
-    <div className={`settings-layout ${profile ? 'has-profile' : ''}`}>
-      <section className="content-card settings-dark-panel">
-        <div className="card-head settings-dark-headline">
-          <div>
-            <h3>Production Settings</h3>
-            <p>Configure production steps, workforce directory, and dynamic manufacturing fields.</p>
-          </div>
-          <button type="button" className="primary-btn" onClick={() => void saveSettings()} disabled={isSaving}>
-            <Save size={14} />
-            {isSaving ? 'Saving...' : 'Save Settings'}
+    <div className={`settings-tier-layout ${profile ? 'has-profile' : ''}`}>
+      <aside className="settings-tier-nav content-card">
+        <p className="settings-tier-kicker">Settings</p>
+        <h3>Control Center</h3>
+        <p className="panel-placeholder">Choose what to configure across platform and manufacturing workflows.</p>
+
+        <div className="settings-tier-group">
+          <p>Platform Settings</p>
+          <button type="button" className={activeSection === 'profile' ? 'active' : ''} onClick={() => setActiveSection('profile')}>
+            <UserRound size={15} />
+            Profile
           </button>
+          {isAdmin ? (
+            <button type="button" className={activeSection === 'users' ? 'active' : ''} onClick={() => setActiveSection('users')}>
+              <Users size={15} />
+              Users
+            </button>
+          ) : null}
+        </div>
+
+        <div className="settings-tier-group">
+          <p>Manufacturing Settings</p>
+          <button type="button" className={activeSection === 'designers' ? 'active' : ''} onClick={() => setActiveSection('designers')}>
+            <UserRound size={15} />
+            Designers
+          </button>
+          <button type="button" className={activeSection === 'craftsmen' ? 'active' : ''} onClick={() => setActiveSection('craftsmen')}>
+            <Wrench size={15} />
+            Craftsmen
+          </button>
+          <button type="button" className={activeSection === 'steps' ? 'active' : ''} onClick={() => setActiveSection('steps')}>
+            Steps
+          </button>
+          <button type="button" className={activeSection === 'fields' ? 'active' : ''} onClick={() => setActiveSection('fields')}>
+            Fields
+          </button>
+        </div>
+      </aside>
+
+      <section className="content-card settings-tier-main">
+        <div className="card-head">
+          <div>
+            <h3>{sectionConfig[activeSection].title}</h3>
+            <p>{sectionConfig[activeSection].subtitle}</p>
+          </div>
+          {onManufacturingSection && isAdmin ? (
+            <button type="button" className="primary-btn" onClick={() => void saveManufacturingSettings()} disabled={isSaving}>
+              <Save size={14} />
+              {isSaving ? 'Saving...' : 'Save Changes'}
+            </button>
+          ) : null}
         </div>
 
         {error ? <p className="error-banner">{error}</p> : null}
         {success ? <p className="panel-placeholder">{success}</p> : null}
 
-        <div className="settings-dark-block">
-          <div className="settings-dark-section-head">
-            <div>
-              <h4>Production Steps</h4>
-              <p>Define each manufacturing stage and required evidence.</p>
-            </div>
-            <button type="button" className="secondary-btn" onClick={addStep}>
-              <Plus size={14} />
-              Add Step
-            </button>
-          </div>
-
-          <div className="usage-table-wrap settings-dark-table-wrap">
-            <table className="usage-table settings-dark-table">
-              <thead>
-                <tr>
-                  <th>Step Key</th>
-                  <th>Label</th>
-                  <th>Photo</th>
-                  <th>Comment</th>
-                  <th>Active</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {steps.map((step, index) => (
-                  <tr key={`${step.stepKey || 'new'}-${index}`}>
-                    <td>
-                      <input
-                        value={step.stepKey}
-                        onChange={event => {
-                          const value = event.target.value
-                          setSteps(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, stepKey: value } : item))
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={step.label}
-                        onChange={event => {
-                          const value = event.target.value
-                          setSteps(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: value } : item))
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={step.requirePhoto}
-                        onChange={event => {
-                          const checked = event.target.checked
-                          setSteps(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, requirePhoto: checked } : item))
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={step.requireComment}
-                        onChange={event => {
-                          const checked = event.target.checked
-                          setSteps(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, requireComment: checked } : item))
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={step.isActive}
-                        onChange={event => {
-                          const checked = event.target.checked
-                          setSteps(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, isActive: checked } : item))
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <button type="button" className="icon-btn" onClick={() => removeStep(index)} aria-label="Remove step" title="Remove step">
-                        <Trash2 size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="settings-dark-block">
-          <div className="settings-dark-section-head">
-            <div>
-              <h4>
-                <UserRound size={16} />
-                Designers
-              </h4>
-              <p>Add and manage designers for manufacturing projects.</p>
-            </div>
-            <button type="button" className="secondary-btn" onClick={() => addPerson('designer')}>
-              <Plus size={14} />
-              Add Designer
-            </button>
-          </div>
-
-          <div className="usage-table-wrap settings-dark-table-wrap">
-            <table className="usage-table settings-dark-table workforce-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Phone</th>
-                  <th>Active</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {designers.map((person, index) => (
-                  <tr key={`${person.id}-${index}`}>
-                    <td>
-                      <input
-                        value={person.name}
-                        placeholder="Designer name"
-                        onChange={event => updatePerson('designer', index, { name: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={person.email}
-                        placeholder="designer@company.com"
-                        onChange={event => updatePerson('designer', index, { email: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={person.phone}
-                        placeholder="+66..."
-                        onChange={event => updatePerson('designer', index, { phone: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={person.isActive}
-                        onChange={event => updatePerson('designer', index, { isActive: event.target.checked })}
-                      />
-                    </td>
-                    <td>
-                      <div className="workforce-actions">
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          onClick={() => void openProfile(person)}
-                          disabled={person.id <= 0}
-                          aria-label="View profile"
-                          title="View profile"
-                        >
-                          <Eye size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          onClick={() => removePerson('designer', index)}
-                          aria-label="Remove designer"
-                          title="Remove designer"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="settings-dark-block">
-          <div className="settings-dark-section-head">
-            <div>
-              <h4>
-                <Wrench size={16} />
-                Craftsmen
-              </h4>
-              <p>Manage craftsman contacts used in project details and workflow logs.</p>
-            </div>
-            <button type="button" className="secondary-btn" onClick={() => addPerson('craftsman')}>
-              <Plus size={14} />
-              Add Craftsman
-            </button>
-          </div>
-
-          <div className="usage-table-wrap settings-dark-table-wrap">
-            <table className="usage-table settings-dark-table workforce-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Phone</th>
-                  <th>Active</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {craftsmen.map((person, index) => (
-                  <tr key={`${person.id}-${index}`}>
-                    <td>
-                      <input
-                        value={person.name}
-                        placeholder="Craftsman name"
-                        onChange={event => updatePerson('craftsman', index, { name: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={person.email}
-                        placeholder="craftsman@company.com"
-                        onChange={event => updatePerson('craftsman', index, { email: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={person.phone}
-                        placeholder="+66..."
-                        onChange={event => updatePerson('craftsman', index, { phone: event.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={person.isActive}
-                        onChange={event => updatePerson('craftsman', index, { isActive: event.target.checked })}
-                      />
-                    </td>
-                    <td>
-                      <div className="workforce-actions">
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          onClick={() => void openProfile(person)}
-                          disabled={person.id <= 0}
-                          aria-label="View profile"
-                          title="View profile"
-                        >
-                          <Eye size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          onClick={() => removePerson('craftsman', index)}
-                          aria-label="Remove craftsman"
-                          title="Remove craftsman"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="settings-dark-block">
-          <div className="settings-dark-section-head">
-            <div>
-              <h4>Manufacturing Fields</h4>
-              <p>Manage extra dynamic fields for project forms.</p>
-            </div>
-            <button type="button" className="secondary-btn" onClick={addField}>
-              <Plus size={14} />
-              Add Field
-            </button>
-          </div>
-
-          <div className="usage-table-wrap settings-dark-table-wrap">
-            <table className="usage-table settings-dark-table">
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Label</th>
-                  <th>Type</th>
-                  <th>Required</th>
-                  <th>Active</th>
-                  <th>Options</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {fields.map((field, index) => (
-                  <tr key={`${field.fieldKey || 'field'}-${index}`}>
-                    <td>
-                      <input
-                        value={field.fieldKey}
-                        onChange={event => {
-                          const value = event.target.value
-                          setFields(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, fieldKey: value } : item))
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={field.label}
-                        onChange={event => {
-                          const value = event.target.value
-                          setFields(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: value } : item))
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={field.fieldType}
-                        onChange={event => {
-                          const value = event.target.value as ManufacturingCustomField['fieldType']
-                          setFields(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, fieldType: value } : item))
-                        }}
-                      >
-                        {FIELD_TYPES.map(type => (
-                          <option key={type} value={type}>{type}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={field.isRequired}
-                        onChange={event => {
-                          const checked = event.target.checked
-                          setFields(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, isRequired: checked } : item))
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={field.isActive}
-                        onChange={event => {
-                          const checked = event.target.checked
-                          setFields(current => current.map((item, itemIndex) => itemIndex === index ? { ...item, isActive: checked } : item))
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        value={field.options.join(', ')}
-                        placeholder="A, B, C"
-                        onChange={event => {
-                          const value = event.target.value
-                          setFields(current => current.map((item, itemIndex) => itemIndex === index ? {
-                            ...item,
-                            options: value
-                              .split(',')
-                              .map(option => option.trim())
-                              .filter(option => option.length > 0)
-                          } : item))
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <button type="button" className="icon-btn" onClick={() => removeField(index)} aria-label="Remove field" title="Remove field">
-                        <Trash2 size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {renderActiveSection()}
       </section>
 
       {profile ? (
@@ -696,7 +957,7 @@ export function SettingsPanel() {
               <p className="panel-placeholder">Linked pieces and production history.</p>
             </div>
             <button type="button" className="icon-btn" onClick={() => setProfile(null)} aria-label="Close profile" title="Close profile">
-              <X size={18} />
+              <X size={17} />
             </button>
           </div>
 
