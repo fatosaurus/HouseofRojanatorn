@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ArrowLeft, Expand, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { addCustomerNote, createCustomer, getCustomer, getCustomerActivity, getCustomers } from '../../api/client'
 import type { Customer, CustomerActivity } from '../../api/types'
@@ -369,7 +370,12 @@ export function CustomersPanel() {
           <p>{totalCount.toLocaleString()} customer profiles with spend history</p>
         </div>
         <button type="button" className="primary-btn" onClick={() => setIsCreating(current => !current)}>
-          {isCreating ? 'Cancel' : '+ New Customer'}
+          {isCreating ? 'Cancel' : (
+            <>
+              <Plus size={14} />
+              New Customer
+            </>
+          )}
         </button>
       </div>
 
@@ -470,11 +476,11 @@ export function CustomersPanel() {
             <p>Full page profile view with notes and activity.</p>
           </div>
           <div className="detail-actions-row">
-            <button type="button" className="secondary-btn" onClick={closeFullDetail}>
-              Back To Split View
+            <button type="button" className="icon-btn" onClick={closeFullDetail} aria-label="Back to split view" title="Back to split view">
+              <ArrowLeft size={18} />
             </button>
-            <button type="button" className="secondary-btn" onClick={closeDetail}>
-              Back To Table
+            <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail view" title="Close detail view">
+              <X size={18} />
             </button>
           </div>
         </div>
@@ -510,11 +516,11 @@ export function CustomersPanel() {
           <div className="drawer-head">
             <h3>Customer Detail</h3>
             <div className="detail-actions-row">
-              <button type="button" className="secondary-btn" onClick={openFullDetail}>
-                Full Screen
+              <button type="button" className="icon-btn" onClick={openFullDetail} aria-label="Open full screen" title="Open full screen">
+                <Expand size={18} />
               </button>
-              <button type="button" className="secondary-btn" onClick={closeDetail}>
-                Close
+              <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail panel" title="Close detail panel">
+                <X size={18} />
               </button>
             </div>
           </div>

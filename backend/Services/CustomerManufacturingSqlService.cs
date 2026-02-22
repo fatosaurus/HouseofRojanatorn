@@ -660,6 +660,16 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 request.UsageNotes,
                 request.ActivityNote);
 
+            var settingCost = request.SettingCost ?? 0m;
+            var diamondCost = request.DiamondCost ?? 0m;
+            var gemstonesForSave = await ResolveGemstonesForPersistenceAsync(
+                conn,
+                tx,
+                request.Gemstones ?? [],
+                cancellationToken);
+            var gemstoneCost = gemstonesForSave.Sum(item => item.LineCost ?? 0m);
+            var totalCost = request.TotalCost ?? (settingCost + diamondCost + gemstoneCost);
+
             int createdId;
             await using (var insertCmd = new SqlCommand(insertSql, conn, tx))
             {
@@ -672,10 +682,10 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 insertCmd.Parameters.AddWithValue("@CraftsmanName", DbNullIfEmpty(request.CraftsmanName));
                 insertCmd.Parameters.AddWithValue("@MetalPlatingJson", SerializeJsonArray(request.MetalPlating));
                 insertCmd.Parameters.AddWithValue("@MetalPlatingNotes", DbNullIfEmpty(request.MetalPlatingNotes));
-                insertCmd.Parameters.AddWithValue("@SettingCost", request.SettingCost ?? 0m);
-                insertCmd.Parameters.AddWithValue("@DiamondCost", request.DiamondCost ?? 0m);
-                insertCmd.Parameters.AddWithValue("@GemstoneCost", request.GemstoneCost ?? 0m);
-                insertCmd.Parameters.AddWithValue("@TotalCost", request.TotalCost ?? 0m);
+                insertCmd.Parameters.AddWithValue("@SettingCost", settingCost);
+                insertCmd.Parameters.AddWithValue("@DiamondCost", diamondCost);
+                insertCmd.Parameters.AddWithValue("@GemstoneCost", gemstoneCost);
+                insertCmd.Parameters.AddWithValue("@TotalCost", totalCost);
                 insertCmd.Parameters.AddWithValue("@SellingPrice", request.SellingPrice ?? 0m);
                 insertCmd.Parameters.AddWithValue("@CompletionDate", DbValue(request.CompletionDate));
                 insertCmd.Parameters.AddWithValue("@UsageNotes", DbNullIfEmpty(request.UsageNotes));
@@ -687,7 +697,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 createdId = Convert.ToInt32(await insertCmd.ExecuteScalarAsync(cancellationToken) ?? 0);
             }
 
-            await ReplaceProjectGemstonesAsync(conn, tx, createdId, request.Gemstones ?? [], cancellationToken);
+            await ReplaceProjectGemstonesAsync(conn, tx, createdId, gemstonesForSave, cancellationToken);
             await InsertActivityLogAsync(
                 conn,
                 tx,
@@ -743,6 +753,8 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             : (request.Status is null ? existing.SoldAt : null);
         var designDate = request.DesignDate ?? existing.DesignDate;
         var completionDate = request.CompletionDate ?? existing.CompletionDate;
+        var settingCost = request.SettingCost ?? existing.SettingCost;
+        var diamondCost = request.DiamondCost ?? existing.DiamondCost;
 
         var customerId = request.CustomerId ?? existing.CustomerId;
         if (status != ManufacturingStatuses.Sold && request.Status is not null)
@@ -795,6 +807,16 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 usageNotes,
                 request.ActivityNote);
 
+            IReadOnlyList<ManufacturingGemstoneUpsertRequest>? gemstonesForSave = null;
+            var gemstoneCost = existing.GemstoneCost;
+            if (request.Gemstones is not null)
+            {
+                gemstonesForSave = await ResolveGemstonesForPersistenceAsync(conn, tx, request.Gemstones, cancellationToken);
+                gemstoneCost = gemstonesForSave.Sum(item => item.LineCost ?? 0m);
+            }
+
+            var totalCost = request.TotalCost ?? (settingCost + diamondCost + gemstoneCost);
+
             await using (var updateCmd = new SqlCommand(updateSql, conn, tx))
             {
                 updateCmd.Parameters.AddWithValue("@ProjectId", projectId);
@@ -807,10 +829,10 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 updateCmd.Parameters.AddWithValue("@CraftsmanName", request.CraftsmanName is null ? DbNullIfEmpty(existing.CraftsmanName) : DbNullIfEmpty(request.CraftsmanName));
                 updateCmd.Parameters.AddWithValue("@MetalPlatingJson", SerializeJsonArray(request.MetalPlating ?? existing.MetalPlating));
                 updateCmd.Parameters.AddWithValue("@MetalPlatingNotes", request.MetalPlatingNotes is null ? DbNullIfEmpty(existing.MetalPlatingNotes) : DbNullIfEmpty(request.MetalPlatingNotes));
-                updateCmd.Parameters.AddWithValue("@SettingCost", request.SettingCost ?? existing.SettingCost);
-                updateCmd.Parameters.AddWithValue("@DiamondCost", request.DiamondCost ?? existing.DiamondCost);
-                updateCmd.Parameters.AddWithValue("@GemstoneCost", request.GemstoneCost ?? existing.GemstoneCost);
-                updateCmd.Parameters.AddWithValue("@TotalCost", request.TotalCost ?? existing.TotalCost);
+                updateCmd.Parameters.AddWithValue("@SettingCost", settingCost);
+                updateCmd.Parameters.AddWithValue("@DiamondCost", diamondCost);
+                updateCmd.Parameters.AddWithValue("@GemstoneCost", gemstoneCost);
+                updateCmd.Parameters.AddWithValue("@TotalCost", totalCost);
                 updateCmd.Parameters.AddWithValue("@SellingPrice", request.SellingPrice ?? existing.SellingPrice);
                 updateCmd.Parameters.AddWithValue("@CompletionDate", DbValue(completionDate));
                 updateCmd.Parameters.AddWithValue("@UsageNotes", request.UsageNotes is null ? DbNullIfEmpty(existing.UsageNotes) : DbNullIfEmpty(request.UsageNotes));
@@ -827,9 +849,9 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 }
             }
 
-            if (request.Gemstones is not null)
+            if (gemstonesForSave is not null)
             {
-                await ReplaceProjectGemstonesAsync(conn, tx, projectId, request.Gemstones, cancellationToken);
+                await ReplaceProjectGemstonesAsync(conn, tx, projectId, gemstonesForSave, cancellationToken);
             }
 
             var statusChanged = !string.Equals(existing.Status, status, StringComparison.OrdinalIgnoreCase);
@@ -1498,6 +1520,203 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         };
     }
 
+    private async Task<IReadOnlyList<ManufacturingGemstoneUpsertRequest>> ResolveGemstonesForPersistenceAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        IReadOnlyList<ManufacturingGemstoneUpsertRequest> gemstones,
+        CancellationToken cancellationToken)
+    {
+        if (gemstones.Count == 0)
+        {
+            return [];
+        }
+
+        var pricingById = new Dictionary<int, GemPricingRow>();
+        var pricingByCode = new Dictionary<string, GemPricingRow>(StringComparer.OrdinalIgnoreCase);
+        var resolved = new List<ManufacturingGemstoneUpsertRequest>();
+
+        foreach (var gemstone in gemstones)
+        {
+            var piecesUsed = gemstone.PiecesUsed ?? 0m;
+            var weightUsedCt = gemstone.WeightUsedCt ?? 0m;
+            var normalizedCode = NormalizeGemstoneCode(gemstone.GemstoneCode);
+
+            GemPricingRow? pricing = null;
+            if (gemstone.InventoryItemId.HasValue)
+            {
+                if (!pricingById.TryGetValue(gemstone.InventoryItemId.Value, out pricing))
+                {
+                    pricing = await GetGemPricingByInventoryItemIdAsync(conn, tx, gemstone.InventoryItemId.Value, cancellationToken);
+                    if (pricing is not null)
+                    {
+                        pricingById[gemstone.InventoryItemId.Value] = pricing;
+                        if (!string.IsNullOrWhiteSpace(pricing.NormalizedGemstoneCode))
+                        {
+                            pricingByCode[pricing.NormalizedGemstoneCode] = pricing;
+                        }
+                    }
+                }
+            }
+
+            if (pricing is null && !string.IsNullOrWhiteSpace(normalizedCode))
+            {
+                if (!pricingByCode.TryGetValue(normalizedCode, out pricing))
+                {
+                    pricing = await GetGemPricingByCodeAsync(conn, tx, normalizedCode, cancellationToken);
+                    if (pricing is not null)
+                    {
+                        pricingByCode[normalizedCode] = pricing;
+                        pricingById[pricing.InventoryItemId] = pricing;
+                    }
+                }
+            }
+
+            var lineCost = gemstone.LineCost ?? 0m;
+            if (pricing is not null)
+            {
+                if (pricing.ParsedPricePerCt > 0m && weightUsedCt > 0m)
+                {
+                    lineCost = pricing.ParsedPricePerCt * weightUsedCt;
+                }
+                else if (pricing.ParsedPricePerPiece > 0m && piecesUsed > 0m)
+                {
+                    lineCost = pricing.ParsedPricePerPiece * piecesUsed;
+                }
+            }
+
+            lineCost = decimal.Round(lineCost, 2, MidpointRounding.AwayFromZero);
+
+            var resolvedCode = string.IsNullOrWhiteSpace(gemstone.GemstoneCode)
+                ? pricing?.GemstoneCode
+                : gemstone.GemstoneCode?.Trim();
+            var resolvedType = string.IsNullOrWhiteSpace(gemstone.GemstoneType)
+                ? pricing?.GemstoneType
+                : gemstone.GemstoneType?.Trim();
+
+            resolved.Add(new ManufacturingGemstoneUpsertRequest
+            {
+                InventoryItemId = gemstone.InventoryItemId ?? pricing?.InventoryItemId,
+                GemstoneCode = string.IsNullOrWhiteSpace(resolvedCode) ? null : resolvedCode,
+                GemstoneType = string.IsNullOrWhiteSpace(resolvedType) ? null : resolvedType,
+                PiecesUsed = piecesUsed > 0m ? piecesUsed : null,
+                WeightUsedCt = weightUsedCt > 0m ? weightUsedCt : null,
+                LineCost = lineCost > 0m ? lineCost : null,
+                Notes = string.IsNullOrWhiteSpace(gemstone.Notes) ? null : gemstone.Notes.Trim()
+            });
+        }
+
+        return resolved;
+    }
+
+    private async Task<GemPricingRow?> GetGemPricingByInventoryItemIdAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        int inventoryItemId,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT TOP 1
+                id,
+                gemstone_number,
+                gemstone_number_text,
+                gemstone_type,
+                parsed_price_per_ct,
+                parsed_price_per_piece
+            FROM dbo.gem_inventory_items
+            WHERE id = @InventoryItemId;
+            """;
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@InventoryItemId", inventoryItemId);
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return MapGemPricing(reader);
+    }
+
+    private async Task<GemPricingRow?> GetGemPricingByCodeAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string normalizedGemCode,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT TOP 1
+                id,
+                gemstone_number,
+                gemstone_number_text,
+                gemstone_type,
+                parsed_price_per_ct,
+                parsed_price_per_piece
+            FROM dbo.gem_inventory_items
+            WHERE
+                gemstone_number_text = @GemstoneCode
+                OR gemstone_number_text = @GemstoneCodeHash
+                OR CAST(gemstone_number AS NVARCHAR(64)) = @GemstoneCode
+                OR CAST(gemstone_number AS NVARCHAR(64)) = @GemstoneCodeDigits
+            ORDER BY id;
+            """;
+
+        var codeWithHash = normalizedGemCode.StartsWith("#", StringComparison.Ordinal)
+            ? normalizedGemCode
+            : $"#{normalizedGemCode}";
+        var digitsOnly = new string(normalizedGemCode.Where(char.IsDigit).ToArray());
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@GemstoneCode", normalizedGemCode);
+        cmd.Parameters.AddWithValue("@GemstoneCodeHash", codeWithHash);
+        cmd.Parameters.AddWithValue("@GemstoneCodeDigits", string.IsNullOrWhiteSpace(digitsOnly) ? normalizedGemCode : digitsOnly);
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return MapGemPricing(reader);
+    }
+
+    private static GemPricingRow MapGemPricing(SqlDataReader reader)
+    {
+        var gemstoneCode = GetNullableString(reader, "gemstone_number_text");
+        if (string.IsNullOrWhiteSpace(gemstoneCode))
+        {
+            var number = GetNullableInt32(reader, "gemstone_number");
+            if (number.HasValue)
+            {
+                gemstoneCode = number.Value.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        return new GemPricingRow
+        {
+            InventoryItemId = GetInt32(reader, "id"),
+            GemstoneCode = gemstoneCode,
+            NormalizedGemstoneCode = NormalizeGemstoneCode(gemstoneCode),
+            GemstoneType = GetNullableString(reader, "gemstone_type"),
+            ParsedPricePerCt = GetDecimal(reader, "parsed_price_per_ct"),
+            ParsedPricePerPiece = GetDecimal(reader, "parsed_price_per_piece")
+        };
+    }
+
+    private static string NormalizeGemstoneCode(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = raw.Trim();
+        if (trimmed.StartsWith('#'))
+        {
+            trimmed = trimmed.TrimStart('#');
+        }
+
+        return trimmed.ToUpperInvariant();
+    }
+
     private static async Task ReplaceProjectGemstonesAsync(
         SqlConnection conn,
         SqlTransaction tx,
@@ -1879,6 +2098,16 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         }
 
         return Guid.Parse(Convert.ToString(value) ?? Guid.Empty.ToString());
+    }
+
+    private sealed class GemPricingRow
+    {
+        public int InventoryItemId { get; init; }
+        public string? GemstoneCode { get; init; }
+        public string NormalizedGemstoneCode { get; init; } = string.Empty;
+        public string? GemstoneType { get; init; }
+        public decimal ParsedPricePerCt { get; init; }
+        public decimal ParsedPricePerPiece { get; init; }
     }
 
     private sealed class SoldProjectRow
