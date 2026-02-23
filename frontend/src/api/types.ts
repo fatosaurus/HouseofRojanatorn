@@ -103,6 +103,35 @@ export interface InventoryItemDetail extends InventoryItem {
   manufacturingActivities: InventoryManufacturingActivity[]
 }
 
+export interface InventoryItemCreateRequest {
+  gemstoneNumber?: number | null
+  gemstoneNumberText?: string | null
+  gemstoneType?: string | null
+  shape?: string | null
+  weightPcsRaw?: string | null
+  pricePerCtRaw?: string | null
+  pricePerPieceRaw?: string | null
+  buyingDate?: string | null
+  ownerName?: string | null
+  balancePcs?: number | null
+  balanceCt?: number | null
+  parsedWeightCt?: number | null
+  parsedQuantityPcs?: number | null
+  parsedPricePerCt?: number | null
+  parsedPricePerPiece?: number | null
+}
+
+export interface InventoryRestockRequest {
+  additionalPcs?: number | null
+  additionalCt?: number | null
+  buyingDate?: string | null
+  ownerName?: string | null
+  pricePerCtRaw?: string | null
+  pricePerPieceRaw?: string | null
+  parsedPricePerCt?: number | null
+  parsedPricePerPiece?: number | null
+}
+
 export interface UsageBatch {
   id: number
   productCategory: string

@@ -73,6 +73,37 @@ public sealed class InventoryItemDetailResponse : InventoryItemResponse
     public IReadOnlyList<InventoryManufacturingActivityResponse> ManufacturingActivities { get; init; } = [];
 }
 
+public sealed class InventoryItemCreateRequest
+{
+    public int? GemstoneNumber { get; init; }
+    public string? GemstoneNumberText { get; init; }
+    public string? GemstoneType { get; init; }
+    public string? Shape { get; init; }
+    public string? WeightPcsRaw { get; init; }
+    public string? PricePerCtRaw { get; init; }
+    public string? PricePerPieceRaw { get; init; }
+    public DateTime? BuyingDate { get; init; }
+    public string? OwnerName { get; init; }
+    public decimal? BalancePcs { get; init; }
+    public decimal? BalanceCt { get; init; }
+    public decimal? ParsedWeightCt { get; init; }
+    public decimal? ParsedQuantityPcs { get; init; }
+    public decimal? ParsedPricePerCt { get; init; }
+    public decimal? ParsedPricePerPiece { get; init; }
+}
+
+public sealed class InventoryRestockRequest
+{
+    public decimal? AdditionalPcs { get; init; }
+    public decimal? AdditionalCt { get; init; }
+    public DateTime? BuyingDate { get; init; }
+    public string? OwnerName { get; init; }
+    public string? PricePerCtRaw { get; init; }
+    public string? PricePerPieceRaw { get; init; }
+    public decimal? ParsedPricePerCt { get; init; }
+    public decimal? ParsedPricePerPiece { get; init; }
+}
+
 public sealed class UsageBatchResponse
 {
     public int Id { get; init; }
