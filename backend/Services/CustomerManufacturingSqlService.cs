@@ -1443,6 +1443,18 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             ManufacturingPersonRoles.Craftsman,
             activeOnly: true,
             cancellationToken);
+        var pieceTypeOptions = await GetOptionSetOptionsAsync(
+            conn,
+            null,
+            "piece_type",
+            ManufacturingPieceTypes.Defaults,
+            cancellationToken);
+        var statusOptions = await GetOptionSetOptionsAsync(
+            conn,
+            null,
+            "status",
+            ManufacturingStatuses.Defaults,
+            cancellationToken);
         var materialOptions = await GetOptionSetOptionsAsync(
             conn,
             null,
@@ -1466,6 +1478,8 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 Fields = defaults.Fields,
                 Designers = designers,
                 Craftsmen = craftsmen,
+                PieceTypeOptions = pieceTypeOptions,
+                StatusOptions = statusOptions,
                 MaterialOptions = materialOptions,
                 MetalPlatingOptions = metalPlatingOptions
             };
@@ -1518,6 +1532,8 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 Fields = defaults.Fields,
                 Designers = designers,
                 Craftsmen = craftsmen,
+                PieceTypeOptions = pieceTypeOptions,
+                StatusOptions = statusOptions,
                 MaterialOptions = materialOptions,
                 MetalPlatingOptions = metalPlatingOptions
             };
@@ -1529,6 +1545,8 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             Fields = fields,
             Designers = designers,
             Craftsmen = craftsmen,
+            PieceTypeOptions = pieceTypeOptions,
+            StatusOptions = statusOptions,
             MaterialOptions = materialOptions,
             MetalPlatingOptions = metalPlatingOptions
         };
@@ -1606,6 +1624,8 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             .ThenBy(item => item.FieldKey, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var normalizedPieceTypeOptions = NormalizeOptionValues(request.PieceTypeOptions, ManufacturingPieceTypes.Defaults);
+        var normalizedStatusOptions = NormalizeOptionValues(request.StatusOptions, ManufacturingStatuses.Defaults);
         var normalizedMaterialOptions = NormalizeOptionValues(request.MaterialOptions, BuildDefaultMaterialOptions());
         var normalizedMetalPlatingOptions = NormalizeOptionValues(request.MetalPlatingOptions, BuildDefaultMetalPlatingOptions());
 
@@ -1699,6 +1719,20 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 await insertFieldCmd.ExecuteNonQueryAsync(cancellationToken);
             }
 
+            await UpsertOptionSetAsync(
+                conn,
+                tx,
+                "piece_type",
+                "Piece Type",
+                normalizedPieceTypeOptions,
+                cancellationToken);
+            await UpsertOptionSetAsync(
+                conn,
+                tx,
+                "status",
+                "Status",
+                normalizedStatusOptions,
+                cancellationToken);
             await UpsertOptionSetAsync(
                 conn,
                 tx,
@@ -2628,6 +2662,8 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         {
             Steps = defaultSteps,
             Fields = defaultFields,
+            PieceTypeOptions = ManufacturingPieceTypes.Defaults,
+            StatusOptions = ManufacturingStatuses.Defaults,
             MaterialOptions = BuildDefaultMaterialOptions(),
             MetalPlatingOptions = BuildDefaultMetalPlatingOptions()
         };

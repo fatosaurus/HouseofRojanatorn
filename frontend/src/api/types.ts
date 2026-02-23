@@ -364,6 +364,8 @@ export interface ManufacturingSettings {
   fields: ManufacturingCustomField[]
   designers: ManufacturingPerson[]
   craftsmen: ManufacturingPerson[]
+  pieceTypeOptions: string[]
+  statusOptions: string[]
   materialOptions: string[]
   metalPlatingOptions: string[]
 }
@@ -390,6 +392,8 @@ export interface ManufacturingCustomFieldUpsertRequest {
 export interface ManufacturingSettingsUpdateRequest {
   steps?: ManufacturingProcessStepUpsertRequest[] | null
   fields?: ManufacturingCustomFieldUpsertRequest[] | null
+  pieceTypeOptions?: string[] | null
+  statusOptions?: string[] | null
   materialOptions?: string[] | null
   metalPlatingOptions?: string[] | null
 }

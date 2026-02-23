@@ -422,21 +422,6 @@ export function DashboardPage() {
     return [...values].sort((a, b) => a.localeCompare(b))
   }, [inventory])
 
-  const headerDescription =
-    activeTab === 'customers'
-      ? 'Customer profiles and relationship notes linked to purchases.'
-      : activeTab === 'manufacturing'
-        ? 'Production workflow records aligned with the reference prototype.'
-        : activeTab === 'settings'
-          ? 'Configure production steps, options, and dynamic manufacturing form fields.'
-          : activeTab === 'purchases'
-            ? 'Sold records derived from manufacturing projects with status = sold.'
-            : activeTab === 'analytics'
-              ? 'Business metrics generated from sold projects and customer activity.'
-              : activeTab === 'history'
-                ? 'Mass activity feed across customers, inventory, manufacturing, and sales.'
-                : 'Mapped from real 2026 stock workbook and Azure SQL data.'
-
   function openInventoryDetail(itemId: number) {
     navigate(`/dashboard/inventory/${itemId}`)
   }
@@ -611,8 +596,6 @@ export function DashboardPage() {
       </aside>
 
       <section className="dashboard-main">
-        <p className="page-subtitle">{headerDescription}</p>
-
         {errorMessage ? <p className="error-banner">{errorMessage}</p> : null}
 
         {(activeTab === 'inventory' || activeTab === 'history') ? (

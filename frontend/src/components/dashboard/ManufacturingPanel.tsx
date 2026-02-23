@@ -20,7 +20,8 @@ import type {
   ManufacturingSettings
 } from '../../api/types'
 
-const PIECE_TYPES = ['earrings', 'bracelet', 'choker', 'necklace', 'brooch', 'ring', 'pendant', 'other']
+const DEFAULT_PIECE_TYPE_OPTIONS = ['earrings', 'bracelet', 'choker', 'necklace', 'brooch', 'ring', 'pendant', 'other']
+const DEFAULT_STATUS_OPTIONS = ['approved', 'sent_to_craftsman', 'internal_setting_qc', 'diamond_sorting', 'stone_setting', 'plating', 'final_piece_qc', 'complete_piece', 'ready_for_sale', 'sold']
 const DEFAULT_MATERIAL_OPTIONS = ['Silver', '10K Gold', '18K Gold']
 const DEFAULT_METAL_PLATING_OPTIONS = ['White Gold', 'Gold', 'Rose Gold']
 
@@ -243,6 +244,18 @@ function hasReachedStatus(
 
 function normalizeSelection(value: string): string {
   return value.trim()
+}
+
+function withSelectedOption(options: string[], selected: string): string[] {
+  if (!selected.trim()) {
+    return options
+  }
+
+  if (options.some(option => option === selected)) {
+    return options
+  }
+
+  return [selected, ...options]
 }
 
 function mapDetailToDraft(detail: ManufacturingProjectDetail, fields: ManufacturingCustomField[]): ProjectDraft {
@@ -580,15 +593,14 @@ export function ManufacturingPanel() {
   }, [navigate, route.isInvalid])
 
   const statusOptions = useMemo(() => {
-    if (!settings) {
-      return ['approved', 'sent_to_craftsman', 'internal_setting_qc', 'diamond_sorting', 'stone_setting', 'plating', 'final_piece_qc', 'complete_piece', 'ready_for_sale', 'sold']
-    }
+    const options = settings?.statusOptions.length ? settings.statusOptions : DEFAULT_STATUS_OPTIONS
+    return options.filter(option => option.trim().length > 0)
+  }, [settings?.statusOptions])
 
-    return settings.steps
-      .filter(step => step.isActive)
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map(step => step.stepKey)
-  }, [settings])
+  const pieceTypeOptions = useMemo(
+    () => (settings?.pieceTypeOptions.length ? settings.pieceTypeOptions : DEFAULT_PIECE_TYPE_OPTIONS),
+    [settings?.pieceTypeOptions]
+  )
 
   const activeFields = useMemo(() => {
     if (!settings) {
@@ -669,6 +681,30 @@ export function ManufacturingPanel() {
   const metalPlatingOptions = useMemo(
     () => (settings?.metalPlatingOptions.length ? settings.metalPlatingOptions : DEFAULT_METAL_PLATING_OPTIONS),
     [settings?.metalPlatingOptions]
+  )
+  const draftPieceTypeOptions = useMemo(
+    () => withSelectedOption(pieceTypeOptions, draft.pieceType),
+    [pieceTypeOptions, draft.pieceType]
+  )
+  const editPieceTypeOptions = useMemo(
+    () => withSelectedOption(pieceTypeOptions, editDraft.pieceType),
+    [pieceTypeOptions, editDraft.pieceType]
+  )
+  const draftMaterialOptions = useMemo(
+    () => withSelectedOption(materialOptions, draft.material),
+    [materialOptions, draft.material]
+  )
+  const editMaterialOptions = useMemo(
+    () => withSelectedOption(materialOptions, editDraft.material),
+    [materialOptions, editDraft.material]
+  )
+  const draftStatusOptions = useMemo(
+    () => withSelectedOption(statusOptions, draft.status),
+    [statusOptions, draft.status]
+  )
+  const editStatusOptions = useMemo(
+    () => withSelectedOption(statusOptions, editDraft.status),
+    [statusOptions, editDraft.status]
   )
   const customerLookupByName = useMemo(() => {
     const lookup = new Map<string, Customer>()
@@ -1491,11 +1527,6 @@ export function ManufacturingPanel() {
                 <option key={option} value={option} />
               ))}
             </datalist>
-            <datalist id="material-options">
-              {materialOptions.map(option => (
-                <option key={option} value={option} />
-              ))}
-            </datalist>
             <datalist id="customer-options-create">
               {customers.map(customer => (
                 <option key={customer.id} value={customer.name} />
@@ -1512,24 +1543,24 @@ export function ManufacturingPanel() {
             <label>
               Piece Type
               <select value={draft.pieceType} onChange={event => setDraft(current => ({ ...current, pieceType: event.target.value }))}>
-                {PIECE_TYPES.map(type => (
+                {draftPieceTypeOptions.map(type => (
                   <option key={type} value={type}>{labelize(type)}</option>
                 ))}
               </select>
             </label>
             <label>
               Material
-              <input
-                list="material-options"
-                value={draft.material}
-                placeholder="Select or type material"
-                onChange={event => setDraft(current => ({ ...current, material: event.target.value }))}
-              />
+              <select value={draft.material} onChange={event => setDraft(current => ({ ...current, material: event.target.value }))}>
+                <option value="">Select material</option>
+                {draftMaterialOptions.map(option => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
             </label>
             <label>
               Status
               <select value={draft.status} onChange={event => setDraft(current => ({ ...current, status: event.target.value }))}>
-                {statusOptions.map(status => (
+                {draftStatusOptions.map(status => (
                   <option key={status} value={status}>{labelize(status)}</option>
                 ))}
               </select>
@@ -1884,11 +1915,6 @@ export function ManufacturingPanel() {
                 <option key={option} value={option} />
               ))}
             </datalist>
-            <datalist id="material-options-edit">
-              {materialOptions.map(option => (
-                <option key={option} value={option} />
-              ))}
-            </datalist>
             <datalist id="customer-options-edit">
               {customers.map(customer => (
                 <option key={customer.id} value={customer.name} />
@@ -1905,24 +1931,24 @@ export function ManufacturingPanel() {
             <label>
               Piece Type
               <select value={editDraft.pieceType} onChange={event => setEditDraft(current => ({ ...current, pieceType: event.target.value }))}>
-                {PIECE_TYPES.map(type => (
+                {editPieceTypeOptions.map(type => (
                   <option key={type} value={type}>{labelize(type)}</option>
                 ))}
               </select>
             </label>
             <label>
               Material
-              <input
-                list="material-options-edit"
-                value={editDraft.material}
-                placeholder="Select or type material"
-                onChange={event => setEditDraft(current => ({ ...current, material: event.target.value }))}
-              />
+              <select value={editDraft.material} onChange={event => setEditDraft(current => ({ ...current, material: event.target.value }))}>
+                <option value="">Select material</option>
+                {editMaterialOptions.map(option => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
             </label>
             <label>
               Status
               <select value={editDraft.status} onChange={event => setEditDraft(current => ({ ...current, status: event.target.value }))}>
-                {statusOptions.map(status => (
+                {editStatusOptions.map(status => (
                   <option key={status} value={status}>{labelize(status)}</option>
                 ))}
               </select>

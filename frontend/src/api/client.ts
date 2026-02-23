@@ -511,6 +511,8 @@ function mapManufacturingSettings(record: UnknownRecord): ManufacturingSettings 
     craftsmen: rawCraftsmen
       .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
       .map(mapManufacturingPerson),
+    pieceTypeOptions: readStringArray(record, 'pieceTypeOptions', 'PieceTypeOptions'),
+    statusOptions: readStringArray(record, 'statusOptions', 'StatusOptions'),
     materialOptions: readStringArray(record, 'materialOptions', 'MaterialOptions'),
     metalPlatingOptions: readStringArray(record, 'metalPlatingOptions', 'MetalPlatingOptions')
   }
