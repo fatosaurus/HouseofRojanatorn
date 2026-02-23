@@ -2240,7 +2240,6 @@ export function ManufacturingPanel() {
             </option>
           ))}
         </select>
-        <div />
       </div>
 
       {isLoading ? (

@@ -518,16 +518,20 @@ a:focus-visible {
 
 .filter-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(170px, 1fr));
-  gap: 0.68rem;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 0.62rem;
+  margin-bottom: 0.92rem;
+  align-items: center;
 }
 
 .filter-grid input,
 .filter-grid select {
   border: 1px solid var(--line-strong);
   border-radius: 999px;
-  padding: 0.62rem 0.88rem;
+  min-height: 42px;
+  padding: 0.5rem 0.88rem;
   background: #fffdf9;
+  width: 100%;
 }
 
 .filter-grid input::placeholder {
@@ -793,7 +797,7 @@ a:focus-visible {
 }
 
 .single-row-filter {
-  margin-bottom: 1rem;
+  margin-bottom: 0.92rem;
   grid-template-columns: minmax(0, 1fr);
 }
 

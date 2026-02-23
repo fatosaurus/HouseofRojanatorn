@@ -132,7 +132,6 @@ export function HistoryPanel() {
           <option value="inventory">Inventory</option>
           <option value="usage">Usage</option>
         </select>
-        <div />
       </div>
 
       {isLoading ? (
