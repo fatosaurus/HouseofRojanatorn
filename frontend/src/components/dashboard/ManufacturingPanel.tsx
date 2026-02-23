@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { Check, Expand, Pencil, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
+  createCustomer,
   createManufacturingProject,
+  getCustomers,
   getManufacturingProject,
   getManufacturingProjects,
   getManufacturingSettings,
@@ -12,12 +14,15 @@ import {
 import type {
   ManufacturingCustomField,
   ManufacturingGemstoneUpsertRequest,
+  Customer,
   ManufacturingProjectDetail,
   ManufacturingProjectSummary,
   ManufacturingSettings
 } from '../../api/types'
 
 const PIECE_TYPES = ['earrings', 'bracelet', 'choker', 'necklace', 'brooch', 'ring', 'pendant', 'other']
+const DEFAULT_MATERIAL_OPTIONS = ['Silver', '10K Gold', '18K Gold']
+const DEFAULT_METAL_PLATING_OPTIONS = ['White Gold', 'Gold', 'Rose Gold']
 
 function labelize(value: string | null | undefined): string {
   if (!value) {
@@ -133,16 +138,40 @@ interface ProjectDraft {
   manufacturingCode: string
   pieceName: string
   pieceType: string
+  material: string
   status: string
   designerName: string
   craftsmanName: string
+  customOrder: boolean
+  customerId: string | null
+  customerLookup: string
+  settingCost: string
+  diamondCost: string
   sellingPrice: string
-  totalCost: string
+  maximumDiscountedPrice: string
   metalPlating: string
   usageNotes: string
   photosText: string
   gemstones: ManufacturingGemstoneUpsertRequest[]
   customFields: Record<string, string>
+}
+
+interface CustomerFormDraft {
+  name: string
+  nickname: string
+  email: string
+  phone: string
+  address: string
+  notes: string
+}
+
+const EMPTY_CUSTOMER_FORM: CustomerFormDraft = {
+  name: '',
+  nickname: '',
+  email: '',
+  phone: '',
+  address: '',
+  notes: ''
 }
 
 function buildDraft(defaultStatus: string, fields: ManufacturingCustomField[]): ProjectDraft {
@@ -157,11 +186,17 @@ function buildDraft(defaultStatus: string, fields: ManufacturingCustomField[]): 
     manufacturingCode: '',
     pieceName: '',
     pieceType: 'necklace',
+    material: '',
     status: defaultStatus,
     designerName: '',
     craftsmanName: '',
+    customOrder: false,
+    customerId: null,
+    customerLookup: '',
+    settingCost: '0',
+    diamondCost: '0',
     sellingPrice: '0',
-    totalCost: '0',
+    maximumDiscountedPrice: '0',
     metalPlating: '',
     usageNotes: '',
     photosText: '',
@@ -183,6 +218,33 @@ function calculateGemstoneCost(gemstones: ManufacturingGemstoneUpsertRequest[]):
   return roundCurrency(total)
 }
 
+function parseAmount(value: string): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0
+  }
+  return parsed
+}
+
+function hasReachedStatus(
+  currentStatus: string,
+  targetStatus: string,
+  stepOrderLookup: Record<string, number>
+): boolean {
+  const currentOrder = stepOrderLookup[currentStatus] ?? -1
+  const targetOrder = stepOrderLookup[targetStatus] ?? -1
+
+  if (targetOrder < 0) {
+    return true
+  }
+
+  return currentOrder >= targetOrder
+}
+
+function normalizeSelection(value: string): string {
+  return value.trim()
+}
+
 function mapDetailToDraft(detail: ManufacturingProjectDetail, fields: ManufacturingCustomField[]): ProjectDraft {
   const customFields: Record<string, string> = {}
   for (const field of fields) {
@@ -195,12 +257,18 @@ function mapDetailToDraft(detail: ManufacturingProjectDetail, fields: Manufactur
     manufacturingCode: detail.manufacturingCode,
     pieceName: detail.pieceName,
     pieceType: detail.pieceType ?? 'other',
+    material: detail.material ?? '',
     status: detail.status,
     designerName: detail.designerName ?? '',
     craftsmanName: detail.craftsmanName ?? '',
+    customOrder: detail.customOrder,
+    customerId: detail.customerId,
+    customerLookup: detail.customerName ?? '',
+    settingCost: String(detail.settingCost),
+    diamondCost: String(detail.diamondCost),
     sellingPrice: String(detail.sellingPrice),
-    totalCost: String(detail.totalCost),
-    metalPlating: detail.metalPlating.join(', '),
+    maximumDiscountedPrice: String(detail.maximumDiscountedPrice),
+    metalPlating: detail.metalPlating[0] ?? '',
     usageNotes: detail.usageNotes ?? '',
     photosText: detail.photos.join('\n'),
     gemstones: detail.gemstones.map(gem => ({
@@ -281,37 +349,27 @@ function parseManufacturingRoute(pathname: string): {
 interface DetailContentProps {
   selected: ManufacturingProjectDetail
   selectedStatus: string
-  statusOptions: string[]
   customFieldLabels: Record<string, string>
   stepRequirementsByStatus: Record<string, { requirePhoto: boolean, requireComment: boolean }>
-  isSaving: boolean
   statusNote: string
   pendingStepPhotos: Array<{ name: string, dataUrl: string }>
   hasExistingStepPhotoEvidence: boolean
-  canSubmitStatusUpdate: boolean
-  onSelectedStatusChange: (value: string) => void
   onStatusNoteChange: (value: string) => void
   onPendingStepPhotosSelect: (files: FileList | null) => void
   onRemovePendingStepPhoto: (index: number) => void
-  onUpdateStatus: () => void
 }
 
 function ManufacturingDetailContent({
   selected,
   selectedStatus,
-  statusOptions,
   customFieldLabels,
   stepRequirementsByStatus,
-  isSaving,
   statusNote,
   pendingStepPhotos,
   hasExistingStepPhotoEvidence,
-  canSubmitStatusUpdate,
-  onSelectedStatusChange,
   onStatusNoteChange,
   onPendingStepPhotosSelect,
-  onRemovePendingStepPhoto,
-  onUpdateStatus
+  onRemovePendingStepPhoto
 }: DetailContentProps) {
   const selectedRequirements = stepRequirementsByStatus[selectedStatus]
 
@@ -319,7 +377,9 @@ function ManufacturingDetailContent({
     <>
       <div className="drawer-grid">
         <p><strong>Type:</strong> {labelize(selected.pieceType)}</p>
+        <p><strong>Material:</strong> {selected.material ?? '-'}</p>
         <p><strong>Status:</strong> {labelize(selected.status)}</p>
+        <p><strong>Custom Order:</strong> {selected.customOrder ? 'Yes' : 'No'}</p>
         <p><strong>Design Date:</strong> {formatDate(selected.designDate)}</p>
         <p><strong>Completion Date:</strong> {formatDate(selected.completionDate)}</p>
         <p><strong>Designer:</strong> {selected.designerName ?? '-'}</p>
@@ -330,6 +390,7 @@ function ManufacturingDetailContent({
         <p><strong>Diamond Cost:</strong> {formatCurrency(selected.diamondCost)}</p>
         <p><strong>Gemstone Cost:</strong> {formatCurrency(selected.gemstoneCost)}</p>
         <p><strong>Selling Price:</strong> {formatCurrency(selected.sellingPrice)}</p>
+        <p><strong>Maximum Discounted:</strong> {formatCurrency(selected.maximumDiscountedPrice)}</p>
         <p><strong>Total Cost:</strong> {formatCurrency(selected.totalCost)}</p>
         <p><strong>Customer:</strong> {selected.customerName ?? '-'}</p>
         <p><strong>Sold At:</strong> {formatDate(selected.soldAt)}</p>
@@ -352,17 +413,7 @@ function ManufacturingDetailContent({
       ) : null}
 
       <div className="usage-lines">
-        <h4>Step Update</h4>
-        <div className="status-update-row">
-          <select value={selectedStatus} onChange={event => onSelectedStatusChange(event.target.value)}>
-            {statusOptions.map(status => (
-              <option key={status} value={status}>{labelize(status)}</option>
-            ))}
-          </select>
-          <button type="button" className="primary-btn" onClick={onUpdateStatus} disabled={isSaving || !canSubmitStatusUpdate}>
-            {isSaving ? 'Updating...' : 'Save Step Update'}
-          </button>
-        </div>
+        <h4>Step Evidence</h4>
         {(selectedRequirements?.requirePhoto || selectedRequirements?.requireComment) ? (
           <p className="panel-placeholder">
             {labelize(selectedStatus)} requires:
@@ -440,6 +491,13 @@ function ManufacturingDetailContent({
                   {gem.gemstoneType ?? 'Unknown'}
                 </p>
                 <p>{gem.weightUsedCt} ct / {gem.piecesUsed} pcs</p>
+                <p>
+                  Price:
+                  {' '}
+                  {gem.pricePerCt != null && gem.pricePerCt > 0 ? `${formatCurrency(gem.pricePerCt)} / ct` : '-'}
+                  {' • '}
+                  {gem.pricePerPiece != null && gem.pricePerPiece > 0 ? `${formatCurrency(gem.pricePerPiece)} / pc` : '-'}
+                </p>
                 <p>{formatCurrency(gem.lineCost)}</p>
                 {gem.notes ? <p>{gem.notes}</p> : null}
               </article>
@@ -508,6 +566,12 @@ export function ManufacturingPanel() {
 
   const [noteFile, setNoteFile] = useState<File | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [isLoadingCustomers, setIsLoadingCustomers] = useState(false)
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false)
+  const [customerModalTarget, setCustomerModalTarget] = useState<'draft' | 'edit'>('draft')
+  const [customerDraft, setCustomerDraft] = useState<CustomerFormDraft>(EMPTY_CUSTOMER_FORM)
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false)
 
   useEffect(() => {
     if (route.isInvalid) {
@@ -585,9 +649,57 @@ export function ManufacturingPanel() {
 
   const draftGemstoneCost = useMemo(() => calculateGemstoneCost(draft.gemstones), [draft.gemstones])
   const editGemstoneCost = useMemo(() => calculateGemstoneCost(editDraft.gemstones), [editDraft.gemstones])
+  const draftTotalCost = useMemo(
+    () => roundCurrency(parseAmount(draft.settingCost) + parseAmount(draft.diamondCost) + draftGemstoneCost),
+    [draft.diamondCost, draft.settingCost, draftGemstoneCost]
+  )
+  const editTotalCost = useMemo(
+    () => roundCurrency(parseAmount(editDraft.settingCost) + parseAmount(editDraft.diamondCost) + editGemstoneCost),
+    [editDraft.diamondCost, editDraft.settingCost, editGemstoneCost]
+  )
+  const draftSuggestedSellingPrice = useMemo(() => roundCurrency(draftTotalCost * 3.5), [draftTotalCost])
+  const editSuggestedSellingPrice = useMemo(() => roundCurrency(editTotalCost * 3.5), [editTotalCost])
 
   const designerOptions = useMemo(() => (settings?.designers ?? []).map(item => item.name), [settings?.designers])
   const craftsmanOptions = useMemo(() => (settings?.craftsmen ?? []).map(item => item.name), [settings?.craftsmen])
+  const materialOptions = useMemo(
+    () => (settings?.materialOptions.length ? settings.materialOptions : DEFAULT_MATERIAL_OPTIONS),
+    [settings?.materialOptions]
+  )
+  const metalPlatingOptions = useMemo(
+    () => (settings?.metalPlatingOptions.length ? settings.metalPlatingOptions : DEFAULT_METAL_PLATING_OPTIONS),
+    [settings?.metalPlatingOptions]
+  )
+  const customerLookupByName = useMemo(() => {
+    const lookup = new Map<string, Customer>()
+    for (const customer of customers) {
+      lookup.set(customer.name.trim().toLowerCase(), customer)
+    }
+    return lookup
+  }, [customers])
+  const stepOrderLookup = useMemo(() => {
+    const lookup: Record<string, number> = {}
+    statusOptions.forEach((status, index) => {
+      lookup[status] = index
+    })
+    return lookup
+  }, [statusOptions])
+  const draftCanSetSettingCost = useMemo(
+    () => hasReachedStatus(draft.status, 'sent_to_craftsman', stepOrderLookup),
+    [draft.status, stepOrderLookup]
+  )
+  const draftCanSetDiamondCost = useMemo(
+    () => hasReachedStatus(draft.status, 'diamond_sorting', stepOrderLookup),
+    [draft.status, stepOrderLookup]
+  )
+  const editCanSetSettingCost = useMemo(
+    () => hasReachedStatus(editDraft.status, 'sent_to_craftsman', stepOrderLookup),
+    [editDraft.status, stepOrderLookup]
+  )
+  const editCanSetDiamondCost = useMemo(
+    () => hasReachedStatus(editDraft.status, 'diamond_sorting', stepOrderLookup),
+    [editDraft.status, stepOrderLookup]
+  )
 
   const hasExistingStepPhotoEvidence = useMemo(() => {
     if (!selected || !selectedStatus) {
@@ -601,8 +713,63 @@ export function ManufacturingPanel() {
     return selected.activityLog.some(entry => entry.status === selectedStatus && entry.photos.length > 0)
   }, [selected, selectedStatus])
 
+  const hasCurrentStepPhotoEvidence = useMemo(() => {
+    if (!selected) {
+      return false
+    }
+
+    if (selected.photos.length > 0) {
+      return true
+    }
+
+    return selected.activityLog.some(entry => entry.status === selected.status && entry.photos.length > 0)
+  }, [selected])
+
+  const hasCurrentStepCommentEvidence = useMemo(() => {
+    if (!selected) {
+      return false
+    }
+
+    if (selected.usageNotes?.trim()) {
+      return true
+    }
+
+    return selected.activityLog.some(entry => entry.status === selected.status && Boolean(entry.notes?.trim()))
+  }, [selected])
+
+  const stepAdvanceWarning = useMemo(() => {
+    if (!selected || !selectedStatus || selectedStatus === selected.status) {
+      return null
+    }
+
+    const currentOrder = stepOrderLookup[selected.status]
+    const nextOrder = stepOrderLookup[selectedStatus]
+    if (typeof currentOrder === 'number' && typeof nextOrder === 'number' && nextOrder <= currentOrder) {
+      return null
+    }
+
+    const currentRequirements = stepRequirementsByStatus[selected.status]
+    if (!currentRequirements) {
+      return null
+    }
+
+    if (currentRequirements.requirePhoto && !hasCurrentStepPhotoEvidence) {
+      return `Complete the required photo evidence for ${labelize(selected.status)} before moving to ${labelize(selectedStatus)}.`
+    }
+
+    if (currentRequirements.requireComment && !hasCurrentStepCommentEvidence) {
+      return `Complete the required comment for ${labelize(selected.status)} before moving to ${labelize(selectedStatus)}.`
+    }
+
+    return null
+  }, [hasCurrentStepCommentEvidence, hasCurrentStepPhotoEvidence, selected, selectedStatus, stepOrderLookup, stepRequirementsByStatus])
+
   const canSubmitStatusUpdate = useMemo(() => {
     if (!selected || !selectedStatus) {
+      return false
+    }
+
+    if (stepAdvanceWarning) {
       return false
     }
 
@@ -611,7 +778,7 @@ export function ManufacturingPanel() {
     }
 
     return statusNote.trim().length > 0 || pendingStepPhotos.length > 0
-  }, [pendingStepPhotos.length, selected, selectedStatus, statusNote])
+  }, [pendingStepPhotos.length, selected, selectedStatus, statusNote, stepAdvanceWarning])
 
   async function loadRecords(currentSearch: string, currentStatus: string) {
     setIsLoading(true)
@@ -645,12 +812,28 @@ export function ManufacturingPanel() {
     }
   }
 
+  async function loadCustomers() {
+    setIsLoadingCustomers(true)
+    try {
+      const page = await getCustomers({
+        limit: 300,
+        offset: 0
+      })
+      setCustomers(page.items)
+    } catch {
+      setError('Unable to load customers for custom order selection.')
+    } finally {
+      setIsLoadingCustomers(false)
+    }
+  }
+
   useEffect(() => {
     void loadRecords(search, statusFilter)
   }, [search, statusFilter])
 
   useEffect(() => {
     void loadSettings()
+    void loadCustomers()
   }, [])
 
   useEffect(() => {
@@ -739,7 +922,6 @@ export function ManufacturingPanel() {
         designerName: parsed.designerName ?? current.designerName,
         craftsmanName: parsed.craftsmanName ?? current.craftsmanName,
         usageNotes: parsed.usageNotes ?? current.usageNotes,
-        totalCost: parsed.totalCost != null ? String(parsed.totalCost) : current.totalCost,
         sellingPrice: parsed.sellingPrice != null ? String(parsed.sellingPrice) : current.sellingPrice,
         photosText: current.photosText || `uploaded-note:${noteFile.name}`,
         gemstones: parsed.gemstones,
@@ -825,9 +1007,88 @@ export function ManufacturingPanel() {
     setPendingStepPhotos(current => current.filter((_, currentIndex) => currentIndex !== index))
   }
 
+  function openCustomerCreateModal(target: 'draft' | 'edit', initialName?: string) {
+    setCustomerModalTarget(target)
+    setCustomerDraft({
+      ...EMPTY_CUSTOMER_FORM,
+      name: initialName?.trim() ?? ''
+    })
+    setIsCustomerModalOpen(true)
+  }
+
+  function applyCustomerLookup(target: 'draft' | 'edit', lookupValue: string) {
+    const normalized = lookupValue.trim().toLowerCase()
+    const matched = normalized ? customerLookupByName.get(normalized) : null
+
+    if (target === 'draft') {
+      setDraft(current => ({
+        ...current,
+        customerLookup: lookupValue,
+        customerId: matched?.id ?? null
+      }))
+      return
+    }
+
+    setEditDraft(current => ({
+      ...current,
+      customerLookup: lookupValue,
+      customerId: matched?.id ?? null
+    }))
+  }
+
+  async function handleCreateCustomerFromModal() {
+    if (!customerDraft.name.trim()) {
+      setError('Customer name is required.')
+      return
+    }
+
+    setIsSavingCustomer(true)
+    setError(null)
+
+    try {
+      const created = await createCustomer({
+        name: customerDraft.name.trim(),
+        nickname: customerDraft.nickname.trim() || null,
+        email: customerDraft.email.trim() || null,
+        phone: customerDraft.phone.trim() || null,
+        address: customerDraft.address.trim() || null,
+        notes: customerDraft.notes.trim() || null
+      })
+
+      await loadCustomers()
+      if (customerModalTarget === 'draft') {
+        setDraft(current => ({
+          ...current,
+          customOrder: true,
+          customerId: created.id,
+          customerLookup: created.name
+        }))
+      } else {
+        setEditDraft(current => ({
+          ...current,
+          customOrder: true,
+          customerId: created.id,
+          customerLookup: created.name
+        }))
+      }
+
+      setIsCustomerModalOpen(false)
+      setCustomerDraft(EMPTY_CUSTOMER_FORM)
+    } catch {
+      setError('Unable to create customer profile.')
+    } finally {
+      setIsSavingCustomer(false)
+    }
+  }
+
   async function handleCreate() {
     if (!draft.manufacturingCode.trim() || !draft.pieceName.trim()) {
       setError('Manufacturing code and piece name are required.')
+      return
+    }
+
+    if (!draft.material.trim()) {
+      setError('Material is required.')
       return
     }
 
@@ -850,6 +1111,21 @@ export function ManufacturingPanel() {
         setError(`${field.label} is required.`)
         return
       }
+    }
+
+    if (draft.customOrder && !draft.customerId) {
+      setError('Custom orders must be linked to an existing customer profile.')
+      return
+    }
+
+    if (!draftCanSetSettingCost && parseAmount(draft.settingCost) > 0) {
+      setError('Setting cost can be entered only after Sent To Craftsman.')
+      return
+    }
+
+    if (!draftCanSetDiamondCost && parseAmount(draft.diamondCost) > 0) {
+      setError('Diamond cost can be entered only after Diamond Sorting.')
+      return
     }
 
     const photos = parsePhotos(draft.photosText)
@@ -877,15 +1153,17 @@ export function ManufacturingPanel() {
         manufacturingCode: draft.manufacturingCode.trim(),
         pieceName: draft.pieceName.trim(),
         pieceType: draft.pieceType,
+        material: draft.material.trim() || null,
         status: draft.status,
         designerName: draft.designerName.trim() || null,
         craftsmanName: draft.craftsmanName.trim() || null,
-        sellingPrice: Number(draft.sellingPrice) || 0,
-        totalCost: Number(draft.totalCost) || 0,
-        metalPlating: draft.metalPlating
-          .split(',')
-          .map(item => item.trim())
-          .filter(item => item.length > 0),
+        customOrder: draft.customOrder,
+        customerId: draft.customOrder ? draft.customerId : null,
+        settingCost: parseAmount(draft.settingCost),
+        diamondCost: parseAmount(draft.diamondCost),
+        sellingPrice: parseAmount(draft.sellingPrice),
+        maximumDiscountedPrice: parseAmount(draft.maximumDiscountedPrice),
+        metalPlating: normalizeSelection(draft.metalPlating) ? [normalizeSelection(draft.metalPlating)] : [],
         usageNotes: draft.usageNotes.trim() || null,
         photos,
         gemstones: draft.gemstones,
@@ -906,6 +1184,11 @@ export function ManufacturingPanel() {
 
   async function handleUpdateStatus() {
     if (!selected || !selectedStatus) {
+      return
+    }
+
+    if (stepAdvanceWarning) {
+      setError(stepAdvanceWarning)
       return
     }
 
@@ -958,6 +1241,26 @@ export function ManufacturingPanel() {
       return
     }
 
+    if (!editDraft.material.trim()) {
+      setError('Material is required.')
+      return
+    }
+
+    if (editDraft.customOrder && !editDraft.customerId) {
+      setError('Custom orders must be linked to an existing customer profile.')
+      return
+    }
+
+    if (!editCanSetSettingCost && parseAmount(editDraft.settingCost) > 0) {
+      setError('Setting cost can be entered only after Sent To Craftsman.')
+      return
+    }
+
+    if (!editCanSetDiamondCost && parseAmount(editDraft.diamondCost) > 0) {
+      setError('Diamond cost can be entered only after Diamond Sorting.')
+      return
+    }
+
     const photos = parsePhotos(editDraft.photosText)
     const selectedStepRequirements = stepRequirementsByStatus[editDraft.status]
     if (selectedStepRequirements?.requirePhoto && photos.length === 0) {
@@ -1000,15 +1303,17 @@ export function ManufacturingPanel() {
         manufacturingCode: editDraft.manufacturingCode.trim(),
         pieceName: editDraft.pieceName.trim(),
         pieceType: editDraft.pieceType,
+        material: editDraft.material.trim() || null,
         status: editDraft.status,
         designerName: editDraft.designerName.trim() || null,
         craftsmanName: editDraft.craftsmanName.trim() || null,
-        sellingPrice: Number(editDraft.sellingPrice) || 0,
-        totalCost: Number(editDraft.totalCost) || 0,
-        metalPlating: editDraft.metalPlating
-          .split(',')
-          .map(item => item.trim())
-          .filter(item => item.length > 0),
+        customOrder: editDraft.customOrder,
+        customerId: editDraft.customOrder ? editDraft.customerId : null,
+        settingCost: parseAmount(editDraft.settingCost),
+        diamondCost: parseAmount(editDraft.diamondCost),
+        sellingPrice: parseAmount(editDraft.sellingPrice),
+        maximumDiscountedPrice: parseAmount(editDraft.maximumDiscountedPrice),
+        metalPlating: normalizeSelection(editDraft.metalPlating) ? [normalizeSelection(editDraft.metalPlating)] : [],
         usageNotes: editDraft.usageNotes.trim() || null,
         photos,
         gemstones: payloadGemstones,
@@ -1070,10 +1375,58 @@ export function ManufacturingPanel() {
     navigate(`/dashboard/manufacturing/${route.detailId}`)
   }
 
+  const customerModal = isCustomerModalOpen ? (
+    <div className="detail-modal-backdrop">
+      <section className="detail-modal-panel">
+        <div className="drawer-head">
+          <h3>New Customer Profile</h3>
+          <button type="button" className="icon-btn" onClick={() => setIsCustomerModalOpen(false)} aria-label="Close modal" title="Close modal">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="crm-form-grid">
+          <label>
+            Name
+            <input value={customerDraft.name} onChange={event => setCustomerDraft(current => ({ ...current, name: event.target.value }))} />
+          </label>
+          <label>
+            Nickname
+            <input value={customerDraft.nickname} onChange={event => setCustomerDraft(current => ({ ...current, nickname: event.target.value }))} />
+          </label>
+          <label>
+            Email
+            <input value={customerDraft.email} onChange={event => setCustomerDraft(current => ({ ...current, email: event.target.value }))} />
+          </label>
+          <label>
+            Phone
+            <input value={customerDraft.phone} onChange={event => setCustomerDraft(current => ({ ...current, phone: event.target.value }))} />
+          </label>
+          <label className="crm-form-span">
+            Address
+            <input value={customerDraft.address} onChange={event => setCustomerDraft(current => ({ ...current, address: event.target.value }))} />
+          </label>
+          <label className="crm-form-span">
+            Notes
+            <textarea rows={3} value={customerDraft.notes} onChange={event => setCustomerDraft(current => ({ ...current, notes: event.target.value }))} />
+          </label>
+          <div className="crm-form-actions crm-form-span">
+            <button type="button" className="secondary-btn" onClick={() => setIsCustomerModalOpen(false)} disabled={isSavingCustomer}>
+              Cancel
+            </button>
+            <button type="button" className="primary-btn" onClick={() => void handleCreateCustomerFromModal()} disabled={isSavingCustomer}>
+              {isSavingCustomer ? 'Saving...' : 'Create Customer'}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  ) : null
+
   if (route.mode === 'create') {
     return (
-      <section className="content-card content-card-full">
-        <div className="card-head">
+      <>
+        <section className="content-card content-card-full">
+          <div className="card-head">
           <div>
             <h3>New Manufacturing Project</h3>
             <p>Upload a handwritten note first, or switch to manual entry.</p>
@@ -1126,7 +1479,7 @@ export function ManufacturingPanel() {
           </div>
         ) : null}
 
-        {createMode === 'manual' ? (
+          {createMode === 'manual' ? (
           <div className="crm-form-grid" style={{ marginTop: '0.8rem' }}>
             <datalist id="designer-options">
               {designerOptions.map(option => (
@@ -1136,6 +1489,16 @@ export function ManufacturingPanel() {
             <datalist id="craftsman-options">
               {craftsmanOptions.map(option => (
                 <option key={option} value={option} />
+              ))}
+            </datalist>
+            <datalist id="material-options">
+              {materialOptions.map(option => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
+            <datalist id="customer-options-create">
+              {customers.map(customer => (
+                <option key={customer.id} value={customer.name} />
               ))}
             </datalist>
             <label>
@@ -1155,10 +1518,28 @@ export function ManufacturingPanel() {
               </select>
             </label>
             <label>
+              Material
+              <input
+                list="material-options"
+                value={draft.material}
+                placeholder="Select or type material"
+                onChange={event => setDraft(current => ({ ...current, material: event.target.value }))}
+              />
+            </label>
+            <label>
               Status
               <select value={draft.status} onChange={event => setDraft(current => ({ ...current, status: event.target.value }))}>
                 {statusOptions.map(status => (
                   <option key={status} value={status}>{labelize(status)}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Metal Plating
+              <select value={draft.metalPlating} onChange={event => setDraft(current => ({ ...current, metalPlating: event.target.value }))}>
+                <option value="">Select plating</option>
+                {metalPlatingOptions.map(option => (
+                  <option key={option} value={option}>{option}</option>
                 ))}
               </select>
             </label>
@@ -1171,6 +1552,54 @@ export function ManufacturingPanel() {
                 {' • '}
                 {stepRequirementsByStatus[draft.status]?.requireComment ? 'comment required' : 'comment optional'}
               </p>
+            ) : null}
+
+            <label className="crm-form-span">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                <input
+                  type="checkbox"
+                  checked={draft.customOrder}
+                  onChange={event => setDraft(current => ({
+                    ...current,
+                    customOrder: event.target.checked,
+                    customerId: event.target.checked ? current.customerId : null,
+                    customerLookup: event.target.checked ? current.customerLookup : ''
+                  }))}
+                />
+                Custom Order
+              </span>
+            </label>
+
+            {draft.customOrder ? (
+              <>
+                <label>
+                  Customer Search
+                  <input
+                    list="customer-options-create"
+                    value={draft.customerLookup}
+                    onChange={event => applyCustomerLookup('draft', event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        const lookupValue = draft.customerLookup.trim()
+                        if (lookupValue && !customerLookupByName.has(lookupValue.toLowerCase())) {
+                          openCustomerCreateModal('draft', lookupValue)
+                        }
+                      }
+                    }}
+                    placeholder={isLoadingCustomers ? 'Loading customers...' : 'Search existing customer by name'}
+                  />
+                </label>
+                <label>
+                  Customer ID
+                  <input value={draft.customerId ?? '-'} readOnly />
+                </label>
+                <div className="crm-form-actions">
+                  <button type="button" className="secondary-btn" onClick={() => openCustomerCreateModal('draft', draft.customerLookup)}>
+                    Add New Customer
+                  </button>
+                </div>
+              </>
             ) : null}
 
             {activeFields.map(field => {
@@ -1262,22 +1691,63 @@ export function ManufacturingPanel() {
               )
             })}
 
-            <label>
-              Selling Price (THB)
-              <input type="number" value={draft.sellingPrice} onChange={event => setDraft(current => ({ ...current, sellingPrice: event.target.value }))} />
-            </label>
-            <label>
-              Gemstone Cost (Calculated)
-              <input value={formatCurrency(draftGemstoneCost)} readOnly />
-            </label>
-            <label>
-              Total Cost (THB)
-              <input type="number" value={draft.totalCost} onChange={event => setDraft(current => ({ ...current, totalCost: event.target.value }))} />
-            </label>
-            <label className="crm-form-span">
-              Metal Plating (comma separated)
-              <input value={draft.metalPlating} onChange={event => setDraft(current => ({ ...current, metalPlating: event.target.value }))} placeholder="white_gold, rose_gold" />
-            </label>
+            <div className="crm-form-span usage-lines">
+              <h4>Costs</h4>
+              <div className="gemstone-row-grid">
+                <label>
+                  Gemstone Cost (Calculated)
+                  <input value={formatCurrency(draftGemstoneCost)} readOnly />
+                </label>
+                <label>
+                  Setting Cost (THB)
+                  <input
+                    type="number"
+                    value={draft.settingCost}
+                    disabled={!draftCanSetSettingCost}
+                    onChange={event => setDraft(current => ({ ...current, settingCost: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Diamond Cost (THB)
+                  <input
+                    type="number"
+                    value={draft.diamondCost}
+                    disabled={!draftCanSetDiamondCost}
+                    onChange={event => setDraft(current => ({ ...current, diamondCost: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Total Cost (View Only)
+                  <input value={formatCurrency(draftTotalCost)} readOnly />
+                </label>
+              </div>
+              {(!draftCanSetSettingCost || !draftCanSetDiamondCost) ? (
+                <p className="panel-placeholder">
+                  Setting cost unlocks after Sent To Craftsman. Diamond cost unlocks after Diamond Sorting.
+                </p>
+              ) : null}
+            </div>
+            <div className="crm-form-span usage-lines">
+              <h4>Pricing</h4>
+              <div className="gemstone-row-grid">
+                <label>
+                  Final Price (Selling Price)
+                  <input type="number" value={draft.sellingPrice} onChange={event => setDraft(current => ({ ...current, sellingPrice: event.target.value }))} />
+                </label>
+                <label>
+                  Suggested Final Price
+                  <input value={formatCurrency(draftSuggestedSellingPrice)} readOnly />
+                </label>
+                <label>
+                  Maximum Discounted Price
+                  <input
+                    type="number"
+                    value={draft.maximumDiscountedPrice}
+                    onChange={event => setDraft(current => ({ ...current, maximumDiscountedPrice: event.target.value }))}
+                  />
+                </label>
+              </div>
+            </div>
             <label className="crm-form-span">
               Photos (URL or identifier, comma/new line separated)
               <textarea rows={2} value={draft.photosText} onChange={event => setDraft(current => ({ ...current, photosText: event.target.value }))} />
@@ -1375,15 +1845,18 @@ export function ManufacturingPanel() {
               </button>
             </div>
           </div>
-        ) : null}
-      </section>
+          ) : null}
+        </section>
+        {customerModal}
+      </>
     )
   }
 
   if (route.mode === 'edit') {
     return (
-      <section className="content-card content-card-full">
-        <div className="card-head">
+      <>
+        <section className="content-card content-card-full">
+          <div className="card-head">
           <div>
             <h3>Edit Manufacturing Project</h3>
             <p>Update project metadata, gemstones, and workflow details.</p>
@@ -1397,7 +1870,7 @@ export function ManufacturingPanel() {
 
         {error ? <p className="error-banner">{error}</p> : null}
 
-        {isLoadingDetail ? (
+          {isLoadingDetail ? (
           <p className="panel-placeholder">Loading manufacturing detail...</p>
         ) : selected ? (
           <div className="crm-form-grid">
@@ -1409,6 +1882,16 @@ export function ManufacturingPanel() {
             <datalist id="craftsman-options-edit">
               {craftsmanOptions.map(option => (
                 <option key={option} value={option} />
+              ))}
+            </datalist>
+            <datalist id="material-options-edit">
+              {materialOptions.map(option => (
+                <option key={option} value={option} />
+              ))}
+            </datalist>
+            <datalist id="customer-options-edit">
+              {customers.map(customer => (
+                <option key={customer.id} value={customer.name} />
               ))}
             </datalist>
             <label>
@@ -1428,10 +1911,28 @@ export function ManufacturingPanel() {
               </select>
             </label>
             <label>
+              Material
+              <input
+                list="material-options-edit"
+                value={editDraft.material}
+                placeholder="Select or type material"
+                onChange={event => setEditDraft(current => ({ ...current, material: event.target.value }))}
+              />
+            </label>
+            <label>
               Status
               <select value={editDraft.status} onChange={event => setEditDraft(current => ({ ...current, status: event.target.value }))}>
                 {statusOptions.map(status => (
                   <option key={status} value={status}>{labelize(status)}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Metal Plating
+              <select value={editDraft.metalPlating} onChange={event => setEditDraft(current => ({ ...current, metalPlating: event.target.value }))}>
+                <option value="">Select plating</option>
+                {metalPlatingOptions.map(option => (
+                  <option key={option} value={option}>{option}</option>
                 ))}
               </select>
             </label>
@@ -1455,6 +1956,54 @@ export function ManufacturingPanel() {
               />
             </label>
 
+            <label className="crm-form-span">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                <input
+                  type="checkbox"
+                  checked={editDraft.customOrder}
+                  onChange={event => setEditDraft(current => ({
+                    ...current,
+                    customOrder: event.target.checked,
+                    customerId: event.target.checked ? current.customerId : null,
+                    customerLookup: event.target.checked ? current.customerLookup : ''
+                  }))}
+                />
+                Custom Order
+              </span>
+            </label>
+
+            {editDraft.customOrder ? (
+              <>
+                <label>
+                  Customer Search
+                  <input
+                    list="customer-options-edit"
+                    value={editDraft.customerLookup}
+                    onChange={event => applyCustomerLookup('edit', event.target.value)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        const lookupValue = editDraft.customerLookup.trim()
+                        if (lookupValue && !customerLookupByName.has(lookupValue.toLowerCase())) {
+                          openCustomerCreateModal('edit', lookupValue)
+                        }
+                      }
+                    }}
+                    placeholder={isLoadingCustomers ? 'Loading customers...' : 'Search existing customer by name'}
+                  />
+                </label>
+                <label>
+                  Customer ID
+                  <input value={editDraft.customerId ?? '-'} readOnly />
+                </label>
+                <div className="crm-form-actions">
+                  <button type="button" className="secondary-btn" onClick={() => openCustomerCreateModal('edit', editDraft.customerLookup)}>
+                    Add New Customer
+                  </button>
+                </div>
+              </>
+            ) : null}
+
             {Object.entries(editDraft.customFields).map(([fieldKey, value]) => (
               <label key={fieldKey}>
                 {customFieldLabels[fieldKey] ?? labelize(fieldKey)}
@@ -1474,22 +2023,63 @@ export function ManufacturingPanel() {
               </label>
             ))}
 
-            <label>
-              Selling Price (THB)
-              <input type="number" value={editDraft.sellingPrice} onChange={event => setEditDraft(current => ({ ...current, sellingPrice: event.target.value }))} />
-            </label>
-            <label>
-              Gemstone Cost (Calculated)
-              <input value={formatCurrency(editGemstoneCost)} readOnly />
-            </label>
-            <label>
-              Total Cost (THB)
-              <input type="number" value={editDraft.totalCost} onChange={event => setEditDraft(current => ({ ...current, totalCost: event.target.value }))} />
-            </label>
-            <label className="crm-form-span">
-              Metal Plating (comma separated)
-              <input value={editDraft.metalPlating} onChange={event => setEditDraft(current => ({ ...current, metalPlating: event.target.value }))} />
-            </label>
+            <div className="crm-form-span usage-lines">
+              <h4>Costs</h4>
+              <div className="gemstone-row-grid">
+                <label>
+                  Gemstone Cost (Calculated)
+                  <input value={formatCurrency(editGemstoneCost)} readOnly />
+                </label>
+                <label>
+                  Setting Cost (THB)
+                  <input
+                    type="number"
+                    value={editDraft.settingCost}
+                    disabled={!editCanSetSettingCost}
+                    onChange={event => setEditDraft(current => ({ ...current, settingCost: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Diamond Cost (THB)
+                  <input
+                    type="number"
+                    value={editDraft.diamondCost}
+                    disabled={!editCanSetDiamondCost}
+                    onChange={event => setEditDraft(current => ({ ...current, diamondCost: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Total Cost (View Only)
+                  <input value={formatCurrency(editTotalCost)} readOnly />
+                </label>
+              </div>
+              {(!editCanSetSettingCost || !editCanSetDiamondCost) ? (
+                <p className="panel-placeholder">
+                  Setting cost unlocks after Sent To Craftsman. Diamond cost unlocks after Diamond Sorting.
+                </p>
+              ) : null}
+            </div>
+            <div className="crm-form-span usage-lines">
+              <h4>Pricing</h4>
+              <div className="gemstone-row-grid">
+                <label>
+                  Final Price (Selling Price)
+                  <input type="number" value={editDraft.sellingPrice} onChange={event => setEditDraft(current => ({ ...current, sellingPrice: event.target.value }))} />
+                </label>
+                <label>
+                  Suggested Final Price
+                  <input value={formatCurrency(editSuggestedSellingPrice)} readOnly />
+                </label>
+                <label>
+                  Maximum Discounted Price
+                  <input
+                    type="number"
+                    value={editDraft.maximumDiscountedPrice}
+                    onChange={event => setEditDraft(current => ({ ...current, maximumDiscountedPrice: event.target.value }))}
+                  />
+                </label>
+              </div>
+            </div>
             <label className="crm-form-span">
               Photos (URL or identifier, comma/new line separated)
               <textarea rows={2} value={editDraft.photosText} onChange={event => setEditDraft(current => ({ ...current, photosText: event.target.value }))} />
@@ -1582,10 +2172,12 @@ export function ManufacturingPanel() {
               </button>
             </div>
           </div>
-        ) : (
+          ) : (
           <p className="panel-placeholder">No manufacturing detail found for edit mode.</p>
-        )}
-      </section>
+          )}
+        </section>
+        {customerModal}
+      </>
     )
   }
 
@@ -1663,58 +2255,69 @@ export function ManufacturingPanel() {
 
   if (route.isFull) {
     return (
-      <section className="content-card detail-page-card">
-        <div className="card-head">
+      <>
+        <section className="content-card detail-page-card">
+          <div className="card-head">
           <div>
             <h3>Manufacturing Project Detail</h3>
             <p>Full page view for one project record.</p>
           </div>
-          <div className="detail-actions-row">
-            <button type="button" className="icon-btn" onClick={openEdit} aria-label="Edit project" title="Edit project">
-              <Pencil size={18} />
-            </button>
-            <button type="button" className="icon-btn" onClick={closeFullDetail} aria-label="Back to split view" title="Back to split view">
-              <Expand size={18} />
-            </button>
-            <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail view" title="Close detail view">
-              <X size={18} />
-            </button>
+          <div className="detail-header-tools">
+            <div className="status-update-row">
+              <select value={selectedStatus} onChange={event => setSelectedStatus(event.target.value)} disabled={!selected}>
+                {statusOptions.map(status => (
+                  <option key={status} value={status}>{labelize(status)}</option>
+                ))}
+              </select>
+              <button type="button" className="primary-btn" onClick={() => void handleUpdateStatus()} disabled={isSaving || !canSubmitStatusUpdate || !selected}>
+                {isSaving ? 'Updating...' : 'Save Step'}
+              </button>
+            </div>
+            <div className="detail-actions-row">
+              <button type="button" className="icon-btn" onClick={openEdit} aria-label="Edit project" title="Edit project">
+                <Pencil size={18} />
+              </button>
+              <button type="button" className="icon-btn" onClick={closeFullDetail} aria-label="Back to split view" title="Back to split view">
+                <Expand size={18} />
+              </button>
+              <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail view" title="Close detail view">
+                <X size={18} />
+              </button>
+            </div>
           </div>
         </div>
 
-        {isLoadingDetail ? (
+        {stepAdvanceWarning ? <p className="error-banner">{stepAdvanceWarning}</p> : null}
+
+          {isLoadingDetail ? (
           <p className="panel-placeholder">Loading manufacturing detail...</p>
         ) : selected ? (
           <ManufacturingDetailContent
             selected={selected}
             selectedStatus={selectedStatus}
-            statusOptions={statusOptions}
             customFieldLabels={customFieldLabels}
             stepRequirementsByStatus={stepRequirementsByStatus}
-            isSaving={isSaving}
             statusNote={statusNote}
             pendingStepPhotos={pendingStepPhotos}
             hasExistingStepPhotoEvidence={hasExistingStepPhotoEvidence}
-            canSubmitStatusUpdate={canSubmitStatusUpdate}
-            onSelectedStatusChange={setSelectedStatus}
             onStatusNoteChange={setStatusNote}
             onPendingStepPhotosSelect={files => {
               void handlePendingStepPhotosSelect(files)
             }}
             onRemovePendingStepPhoto={removePendingStepPhoto}
-            onUpdateStatus={() => {
-              void handleUpdateStatus()
-            }}
           />
-        ) : (
+          ) : (
           <p className="panel-placeholder">No manufacturing detail found for this route.</p>
-        )}
-      </section>
+          )}
+        </section>
+        {customerModal}
+      </>
     )
   }
 
   return (
-    <div className={`content-split ${route.mode === 'detail' ? 'has-detail' : ''}`}>
+    <>
+      <div className={`content-split ${route.mode === 'detail' ? 'has-detail' : ''}`}>
       <div className="content-split-main">
         {listCard}
       </div>
@@ -1723,18 +2326,32 @@ export function ManufacturingPanel() {
         <aside className="detail-side-panel">
           <div className="drawer-head">
             <h3>Manufacturing Detail</h3>
-            <div className="detail-actions-row">
-              <button type="button" className="icon-btn" onClick={openEdit} aria-label="Edit project" title="Edit project">
-                <Pencil size={18} />
-              </button>
-              <button type="button" className="icon-btn" onClick={openFullDetail} aria-label="Open full screen" title="Open full screen">
-                <Expand size={18} />
-              </button>
-              <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail panel" title="Close detail panel">
-                <X size={18} />
-              </button>
+            <div className="detail-header-tools">
+              <div className="status-update-row">
+                <select value={selectedStatus} onChange={event => setSelectedStatus(event.target.value)} disabled={!selected}>
+                  {statusOptions.map(status => (
+                    <option key={status} value={status}>{labelize(status)}</option>
+                  ))}
+                </select>
+                <button type="button" className="primary-btn" onClick={() => void handleUpdateStatus()} disabled={isSaving || !canSubmitStatusUpdate || !selected}>
+                  {isSaving ? 'Updating...' : 'Save Step'}
+                </button>
+              </div>
+              <div className="detail-actions-row">
+                <button type="button" className="icon-btn" onClick={openEdit} aria-label="Edit project" title="Edit project">
+                  <Pencil size={18} />
+                </button>
+                <button type="button" className="icon-btn" onClick={openFullDetail} aria-label="Open full screen" title="Open full screen">
+                  <Expand size={18} />
+                </button>
+                <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail panel" title="Close detail panel">
+                  <X size={18} />
+                </button>
+              </div>
             </div>
           </div>
+
+          {stepAdvanceWarning ? <p className="error-banner">{stepAdvanceWarning}</p> : null}
 
           {isLoadingDetail ? (
             <p className="panel-placeholder">Loading manufacturing detail...</p>
@@ -1742,29 +2359,24 @@ export function ManufacturingPanel() {
             <ManufacturingDetailContent
               selected={selected}
               selectedStatus={selectedStatus}
-              statusOptions={statusOptions}
               customFieldLabels={customFieldLabels}
               stepRequirementsByStatus={stepRequirementsByStatus}
-              isSaving={isSaving}
               statusNote={statusNote}
               pendingStepPhotos={pendingStepPhotos}
               hasExistingStepPhotoEvidence={hasExistingStepPhotoEvidence}
-              canSubmitStatusUpdate={canSubmitStatusUpdate}
-              onSelectedStatusChange={setSelectedStatus}
               onStatusNoteChange={setStatusNote}
               onPendingStepPhotosSelect={files => {
                 void handlePendingStepPhotosSelect(files)
               }}
               onRemovePendingStepPhoto={removePendingStepPhoto}
-              onUpdateStatus={() => {
-                void handleUpdateStatus()
-              }}
             />
           ) : (
             <p className="panel-placeholder">No manufacturing detail found for this record.</p>
           )}
         </aside>
       ) : null}
-    </div>
+      </div>
+      {customerModal}
+    </>
   )
 }

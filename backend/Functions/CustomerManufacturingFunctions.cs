@@ -170,6 +170,28 @@ public sealed class CustomerManufacturingFunctions
         return response;
     }
 
+    [Function("GetPlatformActivity")]
+    public async Task<HttpResponseData> GetPlatformActivity(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "activity")] HttpRequestData req)
+    {
+        var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+        var search = query["search"];
+        var category = query["category"];
+        var limit = ParseInt(query["limit"], 120);
+        var offset = ParseInt(query["offset"], 0);
+
+        var activity = await _service.GetPlatformActivityAsync(
+            search,
+            category,
+            limit,
+            offset,
+            req.FunctionContext.CancellationToken);
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(activity);
+        return response;
+    }
+
     [Function("GetManufacturingProjects")]
     public async Task<HttpResponseData> GetManufacturingProjects(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "manufacturing")] HttpRequestData req)

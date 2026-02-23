@@ -172,6 +172,17 @@ export interface CustomerActivity {
   notes: string | null
 }
 
+export interface PlatformActivityLog {
+  eventType: string
+  category: string
+  eventAtUtc: string
+  title: string
+  description: string | null
+  actorName: string | null
+  referenceCode: string | null
+  route: string | null
+}
+
 export interface CustomerUpsertRequest {
   name: string
   nickname?: string | null
@@ -191,6 +202,8 @@ export interface ManufacturingGemstone {
   piecesUsed: number
   weightUsedCt: number
   lineCost: number
+  pricePerCt: number | null
+  pricePerPiece: number | null
   notes: string | null
 }
 
@@ -218,7 +231,10 @@ export interface ManufacturingProjectSummary {
   gemstoneCost: number
   totalCost: number
   sellingPrice: number
+  maximumDiscountedPrice: number
   completionDate: string | null
+  customOrder: boolean
+  material: string | null
   customerId: string | null
   customerName: string | null
   soldAt: string | null
@@ -244,7 +260,10 @@ export interface ManufacturingProjectDetail {
   gemstoneCost: number
   totalCost: number
   sellingPrice: number
+  maximumDiscountedPrice: number
   completionDate: string | null
+  customOrder: boolean
+  material: string | null
   usageNotes: string | null
   photos: string[]
   customerId: string | null
@@ -282,7 +301,10 @@ export interface ManufacturingProjectUpsertRequest {
   gemstoneCost?: number | null
   totalCost?: number | null
   sellingPrice?: number | null
+  maximumDiscountedPrice?: number | null
   completionDate?: string | null
+  customOrder?: boolean | null
+  material?: string | null
   usageNotes?: string | null
   photos?: string[] | null
   customerId?: string | null
@@ -342,6 +364,8 @@ export interface ManufacturingSettings {
   fields: ManufacturingCustomField[]
   designers: ManufacturingPerson[]
   craftsmen: ManufacturingPerson[]
+  materialOptions: string[]
+  metalPlatingOptions: string[]
 }
 
 export interface ManufacturingProcessStepUpsertRequest {
@@ -366,6 +390,8 @@ export interface ManufacturingCustomFieldUpsertRequest {
 export interface ManufacturingSettingsUpdateRequest {
   steps?: ManufacturingProcessStepUpsertRequest[] | null
   fields?: ManufacturingCustomFieldUpsertRequest[] | null
+  materialOptions?: string[] | null
+  metalPlatingOptions?: string[] | null
 }
 
 export interface ManufacturingNoteParseResponse {

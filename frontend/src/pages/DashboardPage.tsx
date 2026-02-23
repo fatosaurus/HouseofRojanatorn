@@ -1,18 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, BarChart3, ChevronLeft, ChevronRight, Expand, Factory, Gem, History, LogOut, Settings, ShoppingBag, UserCog, Users, X } from 'lucide-react'
+import { ArrowLeft, BarChart3, ChevronLeft, ChevronRight, Expand, Factory, Gem, History, LogOut, Settings, ShoppingBag, Users, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { getInventoryItem, getInventoryItems, getInventorySummary, getUsageBatches } from '../api/client'
+import { getInventoryItem, getInventoryItems, getInventorySummary } from '../api/client'
 import type { InventoryItem, InventoryItemDetail, InventorySummary } from '../api/types'
 import { useSession } from '../app/useSession'
 import { AnalyticsPanel } from '../components/dashboard/AnalyticsPanel'
 import { CustomersPanel } from '../components/dashboard/CustomersPanel'
+import { HistoryPanel } from '../components/dashboard/HistoryPanel'
 import { ManufacturingPanel } from '../components/dashboard/ManufacturingPanel'
 import { PurchasesPanel } from '../components/dashboard/PurchasesPanel'
 import { SettingsPanel } from '../components/dashboard/SettingsPanel'
-import { UsersPanel } from '../components/dashboard/UsersPanel'
 
-type DashboardTab = 'customers' | 'purchases' | 'inventory' | 'manufacturing' | 'history' | 'analytics' | 'users' | 'settings'
+type DashboardTab = 'customers' | 'purchases' | 'inventory' | 'manufacturing' | 'history' | 'analytics' | 'settings'
 const INVENTORY_PAGE_SIZE = 50
 
 const DASHBOARD_TABS: DashboardTab[] = [
@@ -22,7 +22,6 @@ const DASHBOARD_TABS: DashboardTab[] = [
   'manufacturing',
   'history',
   'analytics',
-  'users',
   'settings'
 ]
 
@@ -33,7 +32,6 @@ const SIDEBAR_ITEMS: Array<{ tab: DashboardTab, label: string, Icon: LucideIcon 
   { tab: 'manufacturing', label: 'Manufacturing', Icon: Factory },
   { tab: 'history', label: 'History', Icon: History },
   { tab: 'analytics', label: 'Analytics', Icon: BarChart3 },
-  { tab: 'users', label: 'Users', Icon: UserCog },
   { tab: 'settings', label: 'Settings', Icon: Settings }
 ]
 
@@ -258,7 +256,6 @@ export function DashboardPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [inventoryTotal, setInventoryTotal] = useState(0)
   const [inventoryOffset, setInventoryOffset] = useState(0)
-  const [usageTotal, setUsageTotal] = useState(0)
 
   const [inventorySearch, setInventorySearch] = useState('')
   const [inventoryType, setInventoryType] = useState('all')
@@ -269,7 +266,6 @@ export function DashboardPage() {
   const [isLoadingInventory, setIsLoadingInventory] = useState(true)
   const [isLoadingInventoryDetail, setIsLoadingInventoryDetail] = useState(false)
   const [isLoadingMoreInventory, setIsLoadingMoreInventory] = useState(false)
-  const [isLoadingUsage, setIsLoadingUsage] = useState(true)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   useEffect(() => {
@@ -356,38 +352,6 @@ export function DashboardPage() {
   }, [activeTab, inventorySearch, inventoryStatus, inventoryType])
 
   useEffect(() => {
-    if (activeTab !== 'history') {
-      return
-    }
-
-    let cancelled = false
-    setIsLoadingUsage(true)
-    void getUsageBatches({
-      limit: 1,
-      offset: 0
-    })
-      .then(result => {
-        if (!cancelled) {
-          setUsageTotal(result.totalCount)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setErrorMessage('Unable to load usage history.')
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoadingUsage(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [activeTab])
-
-  useEffect(() => {
     if (activeTab !== 'inventory' || !inventoryRoute.detailId) {
       setSelectedInventory(null)
       setIsLoadingInventoryDetail(false)
@@ -463,17 +427,15 @@ export function DashboardPage() {
       ? 'Customer profiles and relationship notes linked to purchases.'
       : activeTab === 'manufacturing'
         ? 'Production workflow records aligned with the reference prototype.'
-        : activeTab === 'users'
-          ? 'Invite, activate, and manage platform users and roles.'
-          : activeTab === 'settings'
-            ? 'Configure production steps and dynamic manufacturing form fields.'
-            : activeTab === 'purchases'
-              ? 'Sold records derived from manufacturing projects with status = sold.'
-              : activeTab === 'analytics'
-                ? 'Business metrics generated from sold projects and customer activity.'
-                : activeTab === 'history'
-                  ? 'Historical import has been migrated into manufacturing records.'
-                  : 'Mapped from real 2026 stock workbook and Azure SQL data.'
+        : activeTab === 'settings'
+          ? 'Configure production steps, options, and dynamic manufacturing form fields.'
+          : activeTab === 'purchases'
+            ? 'Sold records derived from manufacturing projects with status = sold.'
+            : activeTab === 'analytics'
+              ? 'Business metrics generated from sold projects and customer activity.'
+              : activeTab === 'history'
+                ? 'Mass activity feed across customers, inventory, manufacturing, and sales.'
+                : 'Mapped from real 2026 stock workbook and Azure SQL data.'
 
   function openInventoryDetail(itemId: number) {
     navigate(`/dashboard/inventory/${itemId}`)
@@ -603,31 +565,6 @@ export function DashboardPage() {
     </section>
   )
 
-  const historyCard = (
-    <section className="content-card">
-      <div className="card-head">
-        <div>
-          <h3>History Moved To Manufacturing</h3>
-          <p>Imported records are now treated as manufacturing projects.</p>
-        </div>
-        <button type="button" className="primary-btn" onClick={() => navigate('/dashboard/manufacturing')}>
-          Open Manufacturing
-        </button>
-      </div>
-
-      <p className="panel-placeholder">
-        The old history dataset has been migrated into Manufacturing.
-        {' '}
-        Click any row in the Manufacturing tab to view full imported details (lines, costs, and notes).
-      </p>
-      <p className="panel-placeholder">
-        Archived raw usage batches currently stored:
-        {' '}
-        {isLoadingUsage ? '...' : usageTotal.toLocaleString()}
-      </p>
-    </section>
-  )
-
   return (
     <main className={`dashboard-shell ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <aside className="dashboard-sidebar">
@@ -707,8 +644,8 @@ export function DashboardPage() {
           <PurchasesPanel />
         ) : activeTab === 'analytics' ? (
           <AnalyticsPanel />
-        ) : activeTab === 'users' ? (
-          <UsersPanel />
+        ) : activeTab === 'history' ? (
+          <HistoryPanel />
         ) : activeTab === 'settings' ? (
           <SettingsPanel />
         ) : activeTab === 'inventory' ? (
@@ -768,9 +705,7 @@ export function DashboardPage() {
               ) : null}
             </div>
           )
-        ) : (
-          historyCard
-        )}
+        ) : null}
       </section>
     </main>
   )
