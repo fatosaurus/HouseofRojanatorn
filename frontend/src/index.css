@@ -719,6 +719,21 @@ a:focus-visible {
   gap: 0.45rem;
 }
 
+.detail-header-tools {
+  display: grid;
+  justify-items: end;
+  gap: 0.42rem;
+}
+
+.detail-header-tools .status-update-row {
+  margin-top: 0;
+  justify-content: flex-end;
+}
+
+.detail-header-tools .status-update-row select {
+  min-width: 180px;
+}
+
 .detail-modal-backdrop {
   position: fixed;
   inset: 0;

@@ -144,6 +144,18 @@ public sealed class CustomerActivityResponse
     public string? Notes { get; init; }
 }
 
+public sealed class PlatformActivityLogResponse
+{
+    public string EventType { get; init; } = string.Empty;
+    public string Category { get; init; } = string.Empty;
+    public DateTime EventAtUtc { get; init; }
+    public string Title { get; init; } = string.Empty;
+    public string? Description { get; init; }
+    public string? ActorName { get; init; }
+    public string? ReferenceCode { get; init; }
+    public string? Route { get; init; }
+}
+
 public sealed class ManufacturingGemstoneResponse
 {
     public int Id { get; init; }
@@ -153,6 +165,8 @@ public sealed class ManufacturingGemstoneResponse
     public decimal PiecesUsed { get; init; }
     public decimal WeightUsedCt { get; init; }
     public decimal LineCost { get; init; }
+    public decimal? PricePerCt { get; init; }
+    public decimal? PricePerPiece { get; init; }
     public string? Notes { get; init; }
 }
 
@@ -182,7 +196,10 @@ public sealed class ManufacturingProjectSummaryResponse
     public decimal GemstoneCost { get; init; }
     public decimal TotalCost { get; init; }
     public decimal SellingPrice { get; init; }
+    public decimal MaximumDiscountedPrice { get; init; }
     public DateTime? CompletionDate { get; init; }
+    public bool CustomOrder { get; init; }
+    public string? Material { get; init; }
     public Guid? CustomerId { get; init; }
     public string? CustomerName { get; init; }
     public DateTime? SoldAt { get; init; }
@@ -209,7 +226,10 @@ public sealed class ManufacturingProjectDetailResponse
     public decimal GemstoneCost { get; init; }
     public decimal TotalCost { get; init; }
     public decimal SellingPrice { get; init; }
+    public decimal MaximumDiscountedPrice { get; init; }
     public DateTime? CompletionDate { get; init; }
+    public bool CustomOrder { get; init; }
+    public string? Material { get; init; }
     public string? UsageNotes { get; init; }
     public IReadOnlyList<string> Photos { get; init; } = [];
     public Guid? CustomerId { get; init; }
@@ -249,7 +269,10 @@ public sealed class ManufacturingProjectUpsertRequest
     public decimal? GemstoneCost { get; init; }
     public decimal? TotalCost { get; init; }
     public decimal? SellingPrice { get; init; }
+    public decimal? MaximumDiscountedPrice { get; init; }
     public DateTime? CompletionDate { get; init; }
+    public bool? CustomOrder { get; init; }
+    public string? Material { get; init; }
     public string? UsageNotes { get; init; }
     public IReadOnlyList<string>? Photos { get; init; }
     public Guid? CustomerId { get; init; }
@@ -315,6 +338,8 @@ public sealed class ManufacturingSettingsResponse
     public IReadOnlyList<ManufacturingCustomFieldResponse> Fields { get; init; } = [];
     public IReadOnlyList<ManufacturingPersonResponse> Designers { get; init; } = [];
     public IReadOnlyList<ManufacturingPersonResponse> Craftsmen { get; init; } = [];
+    public IReadOnlyList<string> MaterialOptions { get; init; } = [];
+    public IReadOnlyList<string> MetalPlatingOptions { get; init; } = [];
 }
 
 public sealed class ManufacturingProcessStepUpsertRequest
@@ -342,6 +367,8 @@ public sealed class ManufacturingSettingsUpdateRequest
 {
     public IReadOnlyList<ManufacturingProcessStepUpsertRequest>? Steps { get; init; }
     public IReadOnlyList<ManufacturingCustomFieldUpsertRequest>? Fields { get; init; }
+    public IReadOnlyList<string>? MaterialOptions { get; init; }
+    public IReadOnlyList<string>? MetalPlatingOptions { get; init; }
 }
 
 public sealed class ManufacturingNoteParseRequest

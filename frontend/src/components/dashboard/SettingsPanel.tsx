@@ -130,6 +130,8 @@ export function SettingsPanel() {
 
   const [steps, setSteps] = useState<ManufacturingProcessStep[]>([])
   const [fields, setFields] = useState<ManufacturingCustomField[]>([])
+  const [materialOptionsInput, setMaterialOptionsInput] = useState('Silver, 10K Gold, 18K Gold')
+  const [metalPlatingOptionsInput, setMetalPlatingOptionsInput] = useState('White Gold, Gold, Rose Gold')
   const [designers, setDesigners] = useState<EditablePerson[]>([])
   const [craftsmen, setCraftsmen] = useState<EditablePerson[]>([])
   const [deletedPersonIds, setDeletedPersonIds] = useState<number[]>([])
@@ -205,6 +207,8 @@ export function SettingsPanel() {
       const settings = await getManufacturingSettings()
       setSteps(settings.steps)
       setFields(settings.fields)
+      setMaterialOptionsInput((settings.materialOptions.length > 0 ? settings.materialOptions : ['Silver', '10K Gold', '18K Gold']).join(', '))
+      setMetalPlatingOptionsInput((settings.metalPlatingOptions.length > 0 ? settings.metalPlatingOptions : ['White Gold', 'Gold', 'Rose Gold']).join(', '))
       setDesigners(mapEditablePeople('designer', settings.designers))
       setCraftsmen(mapEditablePeople('craftsman', settings.craftsmen))
       setDeletedPersonIds([])
@@ -384,7 +388,15 @@ export function SettingsPanel() {
           isRequired: field.isRequired,
           isActive: field.isActive,
           options: field.fieldType === 'select' ? field.options : []
-        }))
+        })),
+        materialOptions: materialOptionsInput
+          .split(',')
+          .map(option => option.trim())
+          .filter(option => option.length > 0),
+        metalPlatingOptions: metalPlatingOptionsInput
+          .split(',')
+          .map(option => option.trim())
+          .filter(option => option.length > 0)
       }
 
       await updateManufacturingSettings(payload)
@@ -756,6 +768,26 @@ export function SettingsPanel() {
   function renderFields() {
     return (
       <>
+        <div className="crm-form-grid settings-inline-form">
+          <label className="crm-form-span">
+            Material Selections
+            <input
+              value={materialOptionsInput}
+              placeholder="Silver, 10K Gold, 18K Gold"
+              onChange={event => setMaterialOptionsInput(event.target.value)}
+            />
+          </label>
+          <label className="crm-form-span">
+            Metal Plating Selections
+            <input
+              value={metalPlatingOptionsInput}
+              placeholder="White Gold, Gold, Rose Gold"
+              onChange={event => setMetalPlatingOptionsInput(event.target.value)}
+            />
+          </label>
+          <p className="panel-placeholder crm-form-span">These option lists are used in manufacturing detail dropdown controls.</p>
+        </div>
+
         <div className="card-head settings-subhead">
           <h4>Manufacturing Fields</h4>
           <button type="button" className="secondary-btn" onClick={addField}>

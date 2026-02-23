@@ -28,6 +28,7 @@ import type {
   ManufacturingProjectUpsertRequest,
   ManufacturingSettings,
   ManufacturingSettingsUpdateRequest,
+  PlatformActivityLog,
   PagedResponse,
   UserListResponse,
   UserSummary,
@@ -354,6 +355,8 @@ function mapManufacturingGemstone(record: UnknownRecord): ManufacturingGemstone 
     piecesUsed: readNumber(record, 'piecesUsed', 'PiecesUsed') ?? 0,
     weightUsedCt: readNumber(record, 'weightUsedCt', 'WeightUsedCt') ?? 0,
     lineCost: readNumber(record, 'lineCost', 'LineCost') ?? 0,
+    pricePerCt: readNumber(record, 'pricePerCt', 'PricePerCt'),
+    pricePerPiece: readNumber(record, 'pricePerPiece', 'PricePerPiece'),
     notes: readString(record, 'notes', 'Notes')
   }
 }
@@ -410,7 +413,10 @@ function mapManufacturingSummary(record: UnknownRecord): ManufacturingProjectSum
     gemstoneCost: readNumber(record, 'gemstoneCost', 'GemstoneCost') ?? 0,
     totalCost: readNumber(record, 'totalCost', 'TotalCost') ?? 0,
     sellingPrice: readNumber(record, 'sellingPrice', 'SellingPrice') ?? 0,
+    maximumDiscountedPrice: readNumber(record, 'maximumDiscountedPrice', 'MaximumDiscountedPrice') ?? 0,
     completionDate: readString(record, 'completionDate', 'CompletionDate'),
+    customOrder: Boolean(pick<unknown>(record, 'customOrder', 'CustomOrder')),
+    material: readString(record, 'material', 'Material'),
     customerId: readString(record, 'customerId', 'CustomerId'),
     customerName: readString(record, 'customerName', 'CustomerName'),
     soldAt: readString(record, 'soldAt', 'SoldAt'),
@@ -441,7 +447,10 @@ function mapManufacturingDetail(record: UnknownRecord): ManufacturingProjectDeta
     gemstoneCost: readNumber(record, 'gemstoneCost', 'GemstoneCost') ?? 0,
     totalCost: readNumber(record, 'totalCost', 'TotalCost') ?? 0,
     sellingPrice: readNumber(record, 'sellingPrice', 'SellingPrice') ?? 0,
+    maximumDiscountedPrice: readNumber(record, 'maximumDiscountedPrice', 'MaximumDiscountedPrice') ?? 0,
     completionDate: readString(record, 'completionDate', 'CompletionDate'),
+    customOrder: Boolean(pick<unknown>(record, 'customOrder', 'CustomOrder')),
+    material: readString(record, 'material', 'Material'),
     usageNotes: readString(record, 'usageNotes', 'UsageNotes'),
     photos: readStringArray(record, 'photos', 'Photos'),
     customerId: readString(record, 'customerId', 'CustomerId'),
@@ -501,7 +510,22 @@ function mapManufacturingSettings(record: UnknownRecord): ManufacturingSettings 
       .map(mapManufacturingPerson),
     craftsmen: rawCraftsmen
       .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
-      .map(mapManufacturingPerson)
+      .map(mapManufacturingPerson),
+    materialOptions: readStringArray(record, 'materialOptions', 'MaterialOptions'),
+    metalPlatingOptions: readStringArray(record, 'metalPlatingOptions', 'MetalPlatingOptions')
+  }
+}
+
+function mapPlatformActivity(record: UnknownRecord): PlatformActivityLog {
+  return {
+    eventType: readString(record, 'eventType', 'EventType') ?? '',
+    category: readString(record, 'category', 'Category') ?? '',
+    eventAtUtc: readString(record, 'eventAtUtc', 'EventAtUtc') ?? '',
+    title: readString(record, 'title', 'Title') ?? '',
+    description: readString(record, 'description', 'Description'),
+    actorName: readString(record, 'actorName', 'ActorName'),
+    referenceCode: readString(record, 'referenceCode', 'ReferenceCode'),
+    route: readString(record, 'route', 'Route')
   }
 }
 
@@ -758,6 +782,24 @@ export async function getCustomerActivity(id: string, limit = 100): Promise<Cust
   return response
     .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
     .map(mapCustomerActivity)
+}
+
+interface PlatformActivityQuery {
+  search?: string
+  category?: string
+  limit?: number
+  offset?: number
+}
+
+export async function getPlatformActivity(query: PlatformActivityQuery): Promise<PagedResponse<PlatformActivityLog>> {
+  const params = new URLSearchParams()
+  if (query.search?.trim()) params.set('search', query.search.trim())
+  if (query.category?.trim() && query.category !== 'all') params.set('category', query.category.trim())
+  if (typeof query.limit === 'number') params.set('limit', String(query.limit))
+  if (typeof query.offset === 'number') params.set('offset', String(query.offset))
+  const suffix = params.toString() ? `?${params}` : ''
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/activity${suffix}`)
+  return mapPagedResponse(response, mapPlatformActivity)
 }
 
 export interface ManufacturingQuery {

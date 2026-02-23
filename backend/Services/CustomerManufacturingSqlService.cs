@@ -15,6 +15,12 @@ public interface ICustomerManufacturingSqlService
     Task<bool> DeleteCustomerAsync(Guid customerId, CancellationToken cancellationToken = default);
     Task<bool> AppendCustomerNoteAsync(Guid customerId, string note, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CustomerActivityResponse>> GetCustomerActivityAsync(Guid customerId, int limit, CancellationToken cancellationToken = default);
+    Task<PagedResponse<PlatformActivityLogResponse>> GetPlatformActivityAsync(
+        string? search,
+        string? category,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken = default);
 
     Task<PagedResponse<ManufacturingProjectSummaryResponse>> GetManufacturingProjectsAsync(
         string? search,
@@ -375,6 +381,164 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         return items;
     }
 
+    public async Task<PagedResponse<PlatformActivityLogResponse>> GetPlatformActivityAsync(
+        string? search,
+        string? category,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken = default)
+    {
+        (limit, offset) = NormalizePaging(limit, offset);
+        var whereClause = BuildPlatformActivityWhereClause(search, category);
+
+        var sourceSql = """
+            SELECT
+                'manufacturing_step' AS event_type,
+                'manufacturing' AS category,
+                l.activity_at_utc AS event_at_utc,
+                CONCAT('Step: ', REPLACE(l.status, '_', ' '), ' • ', mp.manufacturing_code) AS title,
+                l.notes AS description,
+                l.craftsman_name AS actor_name,
+                mp.manufacturing_code AS reference_code,
+                CONCAT('/dashboard/manufacturing/', mp.id) AS route
+            FROM dbo.manufacturing_activity_log l
+            INNER JOIN dbo.manufacturing_projects mp
+                ON mp.id = l.project_id
+
+            UNION ALL
+
+            SELECT
+                'manufacturing_created' AS event_type,
+                'manufacturing' AS category,
+                mp.created_at_utc AS event_at_utc,
+                CONCAT('New manufacturing project: ', mp.manufacturing_code) AS title,
+                CONCAT('Piece: ', mp.piece_name) AS description,
+                mp.designer_name AS actor_name,
+                mp.manufacturing_code AS reference_code,
+                CONCAT('/dashboard/manufacturing/', mp.id) AS route
+            FROM dbo.manufacturing_projects mp
+
+            UNION ALL
+
+            SELECT
+                'sale_recorded' AS event_type,
+                'sales' AS category,
+                COALESCE(mp.sold_at, mp.updated_at_utc) AS event_at_utc,
+                CONCAT('Sale completed: ', mp.manufacturing_code) AS title,
+                CONCAT('Selling Price THB ', CONVERT(NVARCHAR(64), CAST(mp.selling_price AS DECIMAL(18,2)))) AS description,
+                NULL AS actor_name,
+                mp.manufacturing_code AS reference_code,
+                CONCAT('/dashboard/manufacturing/', mp.id) AS route
+            FROM dbo.manufacturing_projects mp
+            WHERE mp.status = 'sold'
+
+            UNION ALL
+
+            SELECT
+                'customer_created' AS event_type,
+                'customers' AS category,
+                c.created_at_utc AS event_at_utc,
+                CONCAT('New customer profile: ', c.name) AS title,
+                c.email AS description,
+                NULL AS actor_name,
+                c.name AS reference_code,
+                CONCAT('/dashboard/customers/', CONVERT(NVARCHAR(36), c.id)) AS route
+            FROM dbo.customers c
+
+            UNION ALL
+
+            SELECT
+                'customer_updated' AS event_type,
+                'customers' AS category,
+                c.updated_at_utc AS event_at_utc,
+                CONCAT('Customer updated: ', c.name) AS title,
+                NULL AS description,
+                NULL AS actor_name,
+                c.name AS reference_code,
+                CONCAT('/dashboard/customers/', CONVERT(NVARCHAR(36), c.id)) AS route
+            FROM dbo.customers c
+            WHERE c.updated_at_utc > DATEADD(SECOND, 1, c.created_at_utc)
+
+            UNION ALL
+
+            SELECT
+                'inventory_imported' AS event_type,
+                'inventory' AS category,
+                gi.imported_at_utc AS event_at_utc,
+                CONCAT('Gem inventory imported: ', COALESCE(NULLIF(gi.gemstone_number_text, ''), CONVERT(NVARCHAR(32), gi.gemstone_number), CONCAT('#', CONVERT(NVARCHAR(32), gi.id)))) AS title,
+                COALESCE(gi.gemstone_type, gi.source_sheet) AS description,
+                gi.owner_name AS actor_name,
+                COALESCE(NULLIF(gi.gemstone_number_text, ''), CONVERT(NVARCHAR(32), gi.gemstone_number), CONVERT(NVARCHAR(32), gi.id)) AS reference_code,
+                CONCAT('/dashboard/inventory/', gi.id) AS route
+            FROM dbo.gem_inventory_items gi
+
+            UNION ALL
+
+            SELECT
+                'usage_batch_imported' AS event_type,
+                'usage' AS category,
+                gb.imported_at_utc AS event_at_utc,
+                CONCAT('Usage batch imported: ', COALESCE(gb.product_code, CONCAT('#', CONVERT(NVARCHAR(32), gb.id)))) AS title,
+                gb.product_category AS description,
+                gb.requester_name AS actor_name,
+                gb.product_code AS reference_code,
+                '/dashboard/history' AS route
+            FROM dbo.gem_usage_batches gb
+            """;
+
+        var countSql = $"SELECT COUNT(*) FROM ({sourceSql}) events {whereClause};";
+        var listSql = $"""
+            SELECT
+                event_type,
+                category,
+                event_at_utc,
+                title,
+                description,
+                actor_name,
+                reference_code,
+                route
+            FROM ({sourceSql}) events
+            {whereClause}
+            ORDER BY event_at_utc DESC, title ASC
+            OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        int totalCount;
+        await using (var countCmd = new SqlCommand(countSql, conn))
+        {
+            ApplyPlatformActivityParams(countCmd, search, category);
+            totalCount = Convert.ToInt32(await countCmd.ExecuteScalarAsync(cancellationToken) ?? 0);
+        }
+
+        var items = new List<PlatformActivityLogResponse>();
+        await using (var listCmd = new SqlCommand(listSql, conn))
+        {
+            ApplyPlatformActivityParams(listCmd, search, category);
+            listCmd.Parameters.AddWithValue("@Offset", offset);
+            listCmd.Parameters.AddWithValue("@Limit", limit);
+            await using var reader = await listCmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(new PlatformActivityLogResponse
+                {
+                    EventType = GetString(reader, "event_type"),
+                    Category = GetString(reader, "category"),
+                    EventAtUtc = GetDateTime(reader, "event_at_utc"),
+                    Title = GetString(reader, "title"),
+                    Description = GetNullableString(reader, "description"),
+                    ActorName = GetNullableString(reader, "actor_name"),
+                    ReferenceCode = GetNullableString(reader, "reference_code"),
+                    Route = GetNullableString(reader, "route")
+                });
+            }
+        }
+
+        return new PagedResponse<PlatformActivityLogResponse>(items, totalCount, limit, offset);
+    }
+
     public async Task<PagedResponse<ManufacturingProjectSummaryResponse>> GetManufacturingProjectsAsync(
         string? search,
         string? status,
@@ -403,7 +567,10 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 mp.gemstone_cost,
                 mp.total_cost,
                 mp.selling_price,
+                mp.maximum_discounted_price,
                 mp.completion_date,
+                mp.custom_order,
+                mp.material,
                 mp.customer_id,
                 mp.sold_at,
                 mp.created_at_utc,
@@ -471,7 +638,10 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 mp.gemstone_cost,
                 mp.total_cost,
                 mp.selling_price,
+                mp.maximum_discounted_price,
                 mp.completion_date,
+                mp.custom_order,
+                mp.material,
                 mp.usage_notes,
                 mp.photos_json,
                 mp.customer_id,
@@ -495,6 +665,8 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 mg.pieces_used,
                 mg.weight_used_ct,
                 mg.line_cost,
+                gi.parsed_price_per_ct,
+                gi.parsed_price_per_piece,
                 mg.notes
             FROM dbo.manufacturing_project_gemstones mg
             LEFT JOIN dbo.gem_inventory_items gi
@@ -562,6 +734,8 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                     PiecesUsed = GetDecimal(reader, "pieces_used"),
                     WeightUsedCt = GetDecimal(reader, "weight_used_ct"),
                     LineCost = GetDecimal(reader, "line_cost"),
+                    PricePerCt = GetNullableDecimal(reader, "parsed_price_per_ct"),
+                    PricePerPiece = GetNullableDecimal(reader, "parsed_price_per_piece"),
                     Notes = GetNullableString(reader, "notes"),
                 });
             }
@@ -603,7 +777,10 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             GemstoneCost = detail.GemstoneCost,
             TotalCost = detail.TotalCost,
             SellingPrice = detail.SellingPrice,
+            MaximumDiscountedPrice = detail.MaximumDiscountedPrice,
             CompletionDate = detail.CompletionDate,
+            CustomOrder = detail.CustomOrder,
+            Material = detail.Material,
             UsageNotes = detail.UsageNotes,
             Photos = detail.Photos,
             CustomerId = detail.CustomerId,
@@ -642,7 +819,10 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 gemstone_cost,
                 total_cost,
                 selling_price,
+                maximum_discounted_price,
                 completion_date,
+                custom_order,
+                material,
                 usage_notes,
                 photos_json,
                 custom_fields_json,
@@ -666,7 +846,10 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 @GemstoneCost,
                 @TotalCost,
                 @SellingPrice,
+                @MaximumDiscountedPrice,
                 @CompletionDate,
+                @CustomOrder,
+                @Material,
                 @UsageNotes,
                 @PhotosJson,
                 @CustomFieldsJson,
@@ -697,13 +880,25 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
 
             var settingCost = request.SettingCost ?? 0m;
             var diamondCost = request.DiamondCost ?? 0m;
+            var customOrder = request.CustomOrder ?? false;
+            var customerId = customOrder ? request.CustomerId : null;
+            if (customOrder && !customerId.HasValue)
+            {
+                throw new ArgumentException("Custom orders must be linked to a customer.");
+            }
+
+            await EnsureCostInputsForStatusAsync(conn, tx, status, settingCost, diamondCost, cancellationToken);
+
             var gemstonesForSave = await ResolveGemstonesForPersistenceAsync(
                 conn,
                 tx,
                 request.Gemstones ?? [],
                 cancellationToken);
             var gemstoneCost = gemstonesForSave.Sum(item => item.LineCost ?? 0m);
-            var totalCost = request.TotalCost ?? (settingCost + diamondCost + gemstoneCost);
+            var totalCost = settingCost + diamondCost + gemstoneCost;
+            var maximumDiscountedPrice = request.MaximumDiscountedPrice ?? 0m;
+            var material = string.IsNullOrWhiteSpace(request.Material) ? null : request.Material.Trim();
+            var metalPlating = NormalizeSingleSelection(request.MetalPlating);
 
             int createdId;
             await using (var insertCmd = new SqlCommand(insertSql, conn, tx))
@@ -715,18 +910,21 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 insertCmd.Parameters.AddWithValue("@DesignerName", DbNullIfEmpty(request.DesignerName));
                 insertCmd.Parameters.AddWithValue("@Status", status);
                 insertCmd.Parameters.AddWithValue("@CraftsmanName", DbNullIfEmpty(request.CraftsmanName));
-                insertCmd.Parameters.AddWithValue("@MetalPlatingJson", SerializeJsonArray(request.MetalPlating));
+                insertCmd.Parameters.AddWithValue("@MetalPlatingJson", SerializeJsonArray(metalPlating));
                 insertCmd.Parameters.AddWithValue("@MetalPlatingNotes", DbNullIfEmpty(request.MetalPlatingNotes));
                 insertCmd.Parameters.AddWithValue("@SettingCost", settingCost);
                 insertCmd.Parameters.AddWithValue("@DiamondCost", diamondCost);
                 insertCmd.Parameters.AddWithValue("@GemstoneCost", gemstoneCost);
                 insertCmd.Parameters.AddWithValue("@TotalCost", totalCost);
                 insertCmd.Parameters.AddWithValue("@SellingPrice", request.SellingPrice ?? 0m);
+                insertCmd.Parameters.AddWithValue("@MaximumDiscountedPrice", maximumDiscountedPrice);
                 insertCmd.Parameters.AddWithValue("@CompletionDate", DbValue(request.CompletionDate));
+                insertCmd.Parameters.AddWithValue("@CustomOrder", customOrder);
+                insertCmd.Parameters.AddWithValue("@Material", DbNullIfEmpty(material));
                 insertCmd.Parameters.AddWithValue("@UsageNotes", DbNullIfEmpty(request.UsageNotes));
                 insertCmd.Parameters.AddWithValue("@PhotosJson", SerializeJsonArray(request.Photos));
                 insertCmd.Parameters.AddWithValue("@CustomFieldsJson", SerializeJsonDictionary(request.CustomFields));
-                insertCmd.Parameters.AddWithValue("@CustomerId", DbValue(request.CustomerId));
+                insertCmd.Parameters.AddWithValue("@CustomerId", DbValue(customerId));
                 insertCmd.Parameters.AddWithValue("@SoldAt", DbValue(request.SoldAt));
 
                 createdId = Convert.ToInt32(await insertCmd.ExecuteScalarAsync(cancellationToken) ?? 0);
@@ -804,11 +1002,14 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         var completionDate = request.CompletionDate ?? existing.CompletionDate;
         var settingCost = request.SettingCost ?? existing.SettingCost;
         var diamondCost = request.DiamondCost ?? existing.DiamondCost;
+        var maximumDiscountedPrice = request.MaximumDiscountedPrice ?? existing.MaximumDiscountedPrice;
+        var customOrder = request.CustomOrder ?? existing.CustomOrder;
+        var material = request.Material is null ? existing.Material : (string.IsNullOrWhiteSpace(request.Material) ? null : request.Material.Trim());
 
-        var customerId = request.CustomerId ?? existing.CustomerId;
-        if (status != ManufacturingStatuses.Sold && request.Status is not null)
+        var customerId = customOrder ? (request.CustomerId ?? existing.CustomerId) : null;
+        if (customOrder && !customerId.HasValue)
         {
-            customerId = request.CustomerId;
+            throw new ArgumentException("Custom orders must be linked to a customer.");
         }
 
         const string updateSql = """
@@ -828,7 +1029,10 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 gemstone_cost = @GemstoneCost,
                 total_cost = @TotalCost,
                 selling_price = @SellingPrice,
+                maximum_discounted_price = @MaximumDiscountedPrice,
                 completion_date = @CompletionDate,
+                custom_order = @CustomOrder,
+                material = @Material,
                 usage_notes = @UsageNotes,
                 photos_json = @PhotosJson,
                 custom_fields_json = @CustomFieldsJson,
@@ -847,6 +1051,15 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         {
             var photos = request.Photos ?? existing.Photos;
             var usageNotes = request.UsageNotes ?? existing.UsageNotes;
+            await EnsureCurrentStepCompletionBeforeAdvanceAsync(
+                conn,
+                tx,
+                projectId,
+                existing.Status,
+                status,
+                existing.UsageNotes,
+                cancellationToken);
+
             var updateStepRequirement = await GetStepRequirementAsync(conn, tx, status, cancellationToken);
             var hasStepPhotoEvidence = await HasStepPhotoEvidenceAsync(
                 conn,
@@ -863,6 +1076,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 hasStepPhotoEvidence,
                 usageNotes,
                 request.ActivityNote);
+            await EnsureCostInputsForStatusAsync(conn, tx, status, settingCost, diamondCost, cancellationToken);
 
             IReadOnlyList<ManufacturingGemstoneUpsertRequest>? gemstonesForSave = null;
             var gemstoneCost = existing.GemstoneCost;
@@ -872,7 +1086,8 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 gemstoneCost = gemstonesForSave.Sum(item => item.LineCost ?? 0m);
             }
 
-            var totalCost = request.TotalCost ?? (settingCost + diamondCost + gemstoneCost);
+            var totalCost = settingCost + diamondCost + gemstoneCost;
+            var metalPlating = NormalizeSingleSelection(request.MetalPlating ?? existing.MetalPlating);
 
             await using (var updateCmd = new SqlCommand(updateSql, conn, tx))
             {
@@ -884,14 +1099,17 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 updateCmd.Parameters.AddWithValue("@DesignerName", request.DesignerName is null ? DbNullIfEmpty(existing.DesignerName) : DbNullIfEmpty(request.DesignerName));
                 updateCmd.Parameters.AddWithValue("@Status", status);
                 updateCmd.Parameters.AddWithValue("@CraftsmanName", request.CraftsmanName is null ? DbNullIfEmpty(existing.CraftsmanName) : DbNullIfEmpty(request.CraftsmanName));
-                updateCmd.Parameters.AddWithValue("@MetalPlatingJson", SerializeJsonArray(request.MetalPlating ?? existing.MetalPlating));
+                updateCmd.Parameters.AddWithValue("@MetalPlatingJson", SerializeJsonArray(metalPlating));
                 updateCmd.Parameters.AddWithValue("@MetalPlatingNotes", request.MetalPlatingNotes is null ? DbNullIfEmpty(existing.MetalPlatingNotes) : DbNullIfEmpty(request.MetalPlatingNotes));
                 updateCmd.Parameters.AddWithValue("@SettingCost", settingCost);
                 updateCmd.Parameters.AddWithValue("@DiamondCost", diamondCost);
                 updateCmd.Parameters.AddWithValue("@GemstoneCost", gemstoneCost);
                 updateCmd.Parameters.AddWithValue("@TotalCost", totalCost);
                 updateCmd.Parameters.AddWithValue("@SellingPrice", request.SellingPrice ?? existing.SellingPrice);
+                updateCmd.Parameters.AddWithValue("@MaximumDiscountedPrice", maximumDiscountedPrice);
                 updateCmd.Parameters.AddWithValue("@CompletionDate", DbValue(completionDate));
+                updateCmd.Parameters.AddWithValue("@CustomOrder", customOrder);
+                updateCmd.Parameters.AddWithValue("@Material", DbNullIfEmpty(material));
                 updateCmd.Parameters.AddWithValue("@UsageNotes", request.UsageNotes is null ? DbNullIfEmpty(existing.UsageNotes) : DbNullIfEmpty(request.UsageNotes));
                 updateCmd.Parameters.AddWithValue("@PhotosJson", SerializeJsonArray(request.Photos ?? existing.Photos));
                 updateCmd.Parameters.AddWithValue("@CustomFieldsJson", SerializeJsonDictionary(request.CustomFields ?? existing.CustomFields));
@@ -1142,7 +1360,10 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 mp.gemstone_cost,
                 mp.total_cost,
                 mp.selling_price,
+                mp.maximum_discounted_price,
                 mp.completion_date,
+                mp.custom_order,
+                mp.material,
                 mp.customer_id,
                 mp.sold_at,
                 mp.created_at_utc,
@@ -1222,6 +1443,18 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             ManufacturingPersonRoles.Craftsman,
             activeOnly: true,
             cancellationToken);
+        var materialOptions = await GetOptionSetOptionsAsync(
+            conn,
+            null,
+            "material",
+            BuildDefaultMaterialOptions(),
+            cancellationToken);
+        var metalPlatingOptions = await GetOptionSetOptionsAsync(
+            conn,
+            null,
+            "metal_plating",
+            BuildDefaultMetalPlatingOptions(),
+            cancellationToken);
 
         if (!await TableExistsAsync(conn, "dbo.manufacturing_process_steps", cancellationToken) ||
             !await TableExistsAsync(conn, "dbo.manufacturing_custom_fields", cancellationToken))
@@ -1232,7 +1465,9 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 Steps = defaults.Steps,
                 Fields = defaults.Fields,
                 Designers = designers,
-                Craftsmen = craftsmen
+                Craftsmen = craftsmen,
+                MaterialOptions = materialOptions,
+                MetalPlatingOptions = metalPlatingOptions
             };
         }
 
@@ -1282,7 +1517,9 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 Steps = defaults.Steps,
                 Fields = defaults.Fields,
                 Designers = designers,
-                Craftsmen = craftsmen
+                Craftsmen = craftsmen,
+                MaterialOptions = materialOptions,
+                MetalPlatingOptions = metalPlatingOptions
             };
         }
 
@@ -1291,7 +1528,9 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             Steps = steps,
             Fields = fields,
             Designers = designers,
-            Craftsmen = craftsmen
+            Craftsmen = craftsmen,
+            MaterialOptions = materialOptions,
+            MetalPlatingOptions = metalPlatingOptions
         };
     }
 
@@ -1366,6 +1605,9 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             .OrderBy(item => item.SortOrder)
             .ThenBy(item => item.FieldKey, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        var normalizedMaterialOptions = NormalizeOptionValues(request.MaterialOptions, BuildDefaultMaterialOptions());
+        var normalizedMetalPlatingOptions = NormalizeOptionValues(request.MetalPlatingOptions, BuildDefaultMetalPlatingOptions());
 
         await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync(cancellationToken);
@@ -1456,6 +1698,21 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 insertFieldCmd.Parameters.AddWithValue("@OptionsJson", SerializeJsonArray(field.Options));
                 await insertFieldCmd.ExecuteNonQueryAsync(cancellationToken);
             }
+
+            await UpsertOptionSetAsync(
+                conn,
+                tx,
+                "material",
+                "Material",
+                normalizedMaterialOptions,
+                cancellationToken);
+            await UpsertOptionSetAsync(
+                conn,
+                tx,
+                "metal_plating",
+                "Metal Plating",
+                normalizedMetalPlatingOptions,
+                cancellationToken);
 
             await tx.CommitAsync(cancellationToken);
             return await GetManufacturingSettingsAsync(cancellationToken);
@@ -1626,6 +1883,36 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         }
     }
 
+    private static string BuildPlatformActivityWhereClause(string? search, string? category)
+    {
+        var clauses = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            clauses.Add("(events.title LIKE @Search OR events.description LIKE @Search OR events.reference_code LIKE @Search OR events.actor_name LIKE @Search)");
+        }
+
+        if (!string.IsNullOrWhiteSpace(category) && !category.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            clauses.Add("events.category = @Category");
+        }
+
+        return clauses.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", clauses);
+    }
+
+    private static void ApplyPlatformActivityParams(SqlCommand command, string? search, string? category)
+    {
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            command.Parameters.AddWithValue("@Search", $"%{search.Trim()}%");
+        }
+
+        if (!string.IsNullOrWhiteSpace(category) && !category.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            command.Parameters.AddWithValue("@Category", category.Trim().ToLowerInvariant());
+        }
+    }
+
     private static string BuildManufacturingWhereClause(string? search, string? status, Guid? customerId)
     {
         var clauses = new List<string>();
@@ -1725,6 +2012,151 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         }
     }
 
+    private async Task EnsureCurrentStepCompletionBeforeAdvanceAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        int projectId,
+        string currentStatus,
+        string nextStatus,
+        string? usageNotes,
+        CancellationToken cancellationToken)
+    {
+        if (string.Equals(currentStatus, nextStatus, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var stepOrderLookup = await GetStepOrderLookupAsync(conn, tx, cancellationToken);
+        if (!IsStatusProgression(stepOrderLookup, currentStatus, nextStatus))
+        {
+            return;
+        }
+
+        var currentRequirements = await GetStepRequirementAsync(conn, tx, currentStatus, cancellationToken);
+        if (!currentRequirements.RequirePhoto && !currentRequirements.RequireComment)
+        {
+            return;
+        }
+
+        var hasPhotoEvidence = !currentRequirements.RequirePhoto || await HasStepPhotoEvidenceAsync(
+            conn,
+            tx,
+            projectId,
+            currentStatus,
+            projectPhotos: null,
+            activityPhotos: null,
+            cancellationToken);
+        var hasCommentEvidence = !currentRequirements.RequireComment || await HasStepCommentEvidenceAsync(
+            conn,
+            tx,
+            projectId,
+            currentStatus,
+            usageNotes,
+            cancellationToken);
+
+        if (!hasPhotoEvidence || !hasCommentEvidence)
+        {
+            throw new ArgumentException($"Complete required evidence for '{currentStatus}' before moving to '{nextStatus}'.");
+        }
+    }
+
+    private async Task EnsureCostInputsForStatusAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string status,
+        decimal settingCost,
+        decimal diamondCost,
+        CancellationToken cancellationToken)
+    {
+        var stepOrderLookup = await GetStepOrderLookupAsync(conn, tx, cancellationToken);
+        if (settingCost > 0m && !HasReachedStep(stepOrderLookup, status, ManufacturingStatuses.SentToCraftsman))
+        {
+            throw new ArgumentException("Setting cost can be entered only after 'sent_to_craftsman' is reached.");
+        }
+
+        if (diamondCost > 0m && !HasReachedStep(stepOrderLookup, status, ManufacturingStatuses.DiamondSorting))
+        {
+            throw new ArgumentException("Diamond cost can be entered only after 'diamond_sorting' is reached.");
+        }
+    }
+
+    private static bool HasReachedStep(
+        IReadOnlyDictionary<string, int> stepOrderLookup,
+        string currentStatus,
+        string requiredStatus)
+    {
+        if (!stepOrderLookup.TryGetValue(ManufacturingStatuses.NormalizeOrDefault(requiredStatus), out var requiredOrder))
+        {
+            return true;
+        }
+
+        if (!stepOrderLookup.TryGetValue(ManufacturingStatuses.NormalizeOrDefault(currentStatus), out var currentOrder))
+        {
+            return false;
+        }
+
+        return currentOrder >= requiredOrder;
+    }
+
+    private static bool IsStatusProgression(
+        IReadOnlyDictionary<string, int> stepOrderLookup,
+        string currentStatus,
+        string nextStatus)
+    {
+        if (!stepOrderLookup.TryGetValue(ManufacturingStatuses.NormalizeOrDefault(currentStatus), out var currentOrder))
+        {
+            return true;
+        }
+
+        if (!stepOrderLookup.TryGetValue(ManufacturingStatuses.NormalizeOrDefault(nextStatus), out var nextOrder))
+        {
+            return true;
+        }
+
+        return nextOrder > currentOrder;
+    }
+
+    private async Task<IReadOnlyDictionary<string, int>> GetStepOrderLookupAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        CancellationToken cancellationToken)
+    {
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_process_steps", cancellationToken, tx))
+        {
+            return ManufacturingStatuses.Defaults
+                .Select((step, index) => new { Step = step, Order = index + 1 })
+                .ToDictionary(item => item.Step, item => item.Order, StringComparer.OrdinalIgnoreCase);
+        }
+
+        const string sql = """
+            SELECT step_key, sort_order
+            FROM dbo.manufacturing_process_steps
+            WHERE is_active = 1
+            ORDER BY sort_order, id;
+            """;
+
+        var lookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var key = ManufacturingStatuses.NormalizeOrDefault(GetString(reader, "step_key"));
+            if (!lookup.ContainsKey(key))
+            {
+                lookup[key] = GetInt32(reader, "sort_order");
+            }
+        }
+
+        if (lookup.Count == 0)
+        {
+            return ManufacturingStatuses.Defaults
+                .Select((step, index) => new { Step = step, Order = index + 1 })
+                .ToDictionary(item => item.Step, item => item.Order, StringComparer.OrdinalIgnoreCase);
+        }
+
+        return lookup;
+    }
+
     private static bool HasAnyText(IReadOnlyList<string>? values)
     {
         return values is not null && values.Any(value => !string.IsNullOrWhiteSpace(value));
@@ -1757,6 +2189,35 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
               AND status = @Status
               AND photos_json IS NOT NULL
               AND LTRIM(RTRIM(photos_json)) NOT IN ('', '[]', 'null');
+            """;
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@ProjectId", projectId);
+        cmd.Parameters.AddWithValue("@Status", ManufacturingStatuses.NormalizeOrDefault(status));
+        var result = Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken) ?? 0);
+        return result > 0;
+    }
+
+    private static async Task<bool> HasStepCommentEvidenceAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        int projectId,
+        string status,
+        string? usageNotes,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(usageNotes))
+        {
+            return true;
+        }
+
+        const string sql = """
+            SELECT COUNT(*)
+            FROM dbo.manufacturing_activity_log
+            WHERE project_id = @ProjectId
+              AND status = @Status
+              AND notes IS NOT NULL
+              AND LTRIM(RTRIM(notes)) <> '';
             """;
 
         await using var cmd = new SqlCommand(sql, conn, tx);
@@ -1951,6 +2412,108 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                string.Equals(key, "craftsmanName", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static IReadOnlyList<string> BuildDefaultMaterialOptions()
+    {
+        return ["Silver", "10K Gold", "18K Gold"];
+    }
+
+    private static IReadOnlyList<string> BuildDefaultMetalPlatingOptions()
+    {
+        return ["White Gold", "Gold", "Rose Gold"];
+    }
+
+    private static IReadOnlyList<string> NormalizeOptionValues(
+        IReadOnlyList<string>? values,
+        IReadOnlyList<string> fallback)
+    {
+        var normalized = values?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+
+        if (normalized.Count == 0)
+        {
+            return fallback;
+        }
+
+        return normalized;
+    }
+
+    private static IReadOnlyList<string> NormalizeSingleSelection(IReadOnlyList<string>? values)
+    {
+        var single = values?
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .FirstOrDefault();
+
+        return string.IsNullOrWhiteSpace(single) ? [] : [single];
+    }
+
+    private async Task<IReadOnlyList<string>> GetOptionSetOptionsAsync(
+        SqlConnection conn,
+        SqlTransaction? tx,
+        string optionKey,
+        IReadOnlyList<string> fallback,
+        CancellationToken cancellationToken)
+    {
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_option_sets", cancellationToken, tx))
+        {
+            return fallback;
+        }
+
+        const string sql = """
+            SELECT TOP 1 options_json
+            FROM dbo.manufacturing_option_sets
+            WHERE option_key = @OptionKey;
+            """;
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@OptionKey", optionKey);
+        var raw = Convert.ToString(await cmd.ExecuteScalarAsync(cancellationToken));
+        var normalized = DeserializeJsonArray(raw);
+        return normalized.Count > 0 ? normalized : fallback;
+    }
+
+    private async Task UpsertOptionSetAsync(
+        SqlConnection conn,
+        SqlTransaction tx,
+        string optionKey,
+        string label,
+        IReadOnlyList<string> values,
+        CancellationToken cancellationToken)
+    {
+        if (!await TableExistsAsync(conn, "dbo.manufacturing_option_sets", cancellationToken, tx))
+        {
+            return;
+        }
+
+        const string sql = """
+            MERGE dbo.manufacturing_option_sets AS target
+            USING (
+                SELECT
+                    @OptionKey AS option_key,
+                    @Label AS label,
+                    @OptionsJson AS options_json
+            ) AS source
+            ON target.option_key = source.option_key
+            WHEN MATCHED THEN
+                UPDATE SET
+                    label = source.label,
+                    options_json = source.options_json,
+                    updated_at_utc = SYSUTCDATETIME()
+            WHEN NOT MATCHED THEN
+                INSERT (option_key, label, options_json, updated_at_utc)
+                VALUES (source.option_key, source.label, source.options_json, SYSUTCDATETIME());
+            """;
+
+        await using var cmd = new SqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("@OptionKey", optionKey);
+        cmd.Parameters.AddWithValue("@Label", label);
+        cmd.Parameters.AddWithValue("@OptionsJson", SerializeJsonArray(values));
+        await cmd.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static string NormalizeStepKey(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -2064,7 +2627,9 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         return new ManufacturingSettingsResponse
         {
             Steps = defaultSteps,
-            Fields = defaultFields
+            Fields = defaultFields,
+            MaterialOptions = BuildDefaultMaterialOptions(),
+            MetalPlatingOptions = BuildDefaultMetalPlatingOptions()
         };
     }
 
@@ -2435,7 +3000,10 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             GemstoneCost = GetDecimal(reader, "gemstone_cost"),
             TotalCost = GetDecimal(reader, "total_cost"),
             SellingPrice = GetDecimal(reader, "selling_price"),
+            MaximumDiscountedPrice = GetDecimal(reader, "maximum_discounted_price"),
             CompletionDate = GetNullableDateTime(reader, "completion_date"),
+            CustomOrder = GetBoolean(reader, "custom_order"),
+            Material = GetNullableString(reader, "material"),
             CustomerId = GetNullableGuid(reader, "customer_id"),
             CustomerName = GetNullableString(reader, "customer_name"),
             SoldAt = GetNullableDateTime(reader, "sold_at"),
@@ -2465,7 +3033,10 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             GemstoneCost = GetDecimal(reader, "gemstone_cost"),
             TotalCost = GetDecimal(reader, "total_cost"),
             SellingPrice = GetDecimal(reader, "selling_price"),
+            MaximumDiscountedPrice = GetDecimal(reader, "maximum_discounted_price"),
             CompletionDate = GetNullableDateTime(reader, "completion_date"),
+            CustomOrder = GetBoolean(reader, "custom_order"),
+            Material = GetNullableString(reader, "material"),
             UsageNotes = GetNullableString(reader, "usage_notes"),
             Photos = DeserializeJsonArray(GetNullableString(reader, "photos_json")),
             CustomerId = GetNullableGuid(reader, "customer_id"),
@@ -2632,6 +3203,17 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         if (reader.IsDBNull(ordinal))
         {
             return 0m;
+        }
+
+        return Convert.ToDecimal(reader.GetValue(ordinal));
+    }
+
+    private static decimal? GetNullableDecimal(SqlDataReader reader, string columnName)
+    {
+        var ordinal = GetOrdinal(reader, columnName);
+        if (reader.IsDBNull(ordinal))
+        {
+            return null;
         }
 
         return Convert.ToDecimal(reader.GetValue(ordinal));

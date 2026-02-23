@@ -25,6 +25,14 @@ public sealed class NoopCustomerManufacturingSqlService : ICustomerManufacturing
     public Task<IReadOnlyList<CustomerActivityResponse>> GetCustomerActivityAsync(Guid customerId, int limit, CancellationToken cancellationToken = default)
         => Task.FromResult<IReadOnlyList<CustomerActivityResponse>>([]);
 
+    public Task<PagedResponse<PlatformActivityLogResponse>> GetPlatformActivityAsync(
+        string? search,
+        string? category,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new PagedResponse<PlatformActivityLogResponse>([], 0, Math.Clamp(limit, 1, 200), Math.Max(offset, 0)));
+
     public Task<PagedResponse<ManufacturingProjectSummaryResponse>> GetManufacturingProjectsAsync(
         string? search,
         string? status,
@@ -109,7 +117,9 @@ public sealed class NoopCustomerManufacturingSqlService : ICustomerManufacturing
                     IsActive = true,
                     IsSystem = true
                 }
-            ]
+            ],
+            MaterialOptions = ["Silver", "10K Gold", "18K Gold"],
+            MetalPlatingOptions = ["White Gold", "Gold", "Rose Gold"]
         });
 
     public Task<ManufacturingSettingsResponse> SaveManufacturingSettingsAsync(
