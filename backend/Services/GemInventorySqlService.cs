@@ -16,6 +16,8 @@ public interface IGemInventorySqlService
         int offset,
         CancellationToken cancellationToken = default);
     Task<InventoryItemDetailResponse?> GetInventoryItemByIdAsync(int id, CancellationToken cancellationToken = default);
+    Task<InventoryItemDetailResponse> CreateInventoryItemAsync(InventoryItemCreateRequest request, CancellationToken cancellationToken = default);
+    Task<InventoryItemDetailResponse?> RestockInventoryItemAsync(int id, InventoryRestockRequest request, CancellationToken cancellationToken = default);
     Task<PagedResponse<UsageBatchResponse>> GetUsageBatchesAsync(
         string? search,
         string? category,
@@ -355,6 +357,158 @@ public sealed class GemInventorySqlService : IGemInventorySqlService
         };
     }
 
+    public async Task<InventoryItemDetailResponse> CreateInventoryItemAsync(
+        InventoryItemCreateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var type = NormalizeRequired(request.GemstoneType, "Gemstone type is required.");
+        var numberText = NormalizeOptional(request.GemstoneNumberText);
+        var gemstoneNumber = request.GemstoneNumber;
+
+        if (gemstoneNumber is null && !string.IsNullOrWhiteSpace(numberText) && int.TryParse(numberText, out var parsed))
+        {
+            gemstoneNumber = parsed;
+        }
+
+        var balancePcs = request.BalancePcs ?? request.ParsedQuantityPcs;
+        var balanceCt = request.BalanceCt ?? request.ParsedWeightCt;
+        var parsedQuantityPcs = request.ParsedQuantityPcs ?? balancePcs;
+        var parsedWeightCt = request.ParsedWeightCt ?? balanceCt;
+
+        const string sql = """
+            INSERT INTO dbo.gem_inventory_items (
+                source_sheet,
+                source_row,
+                gemstone_number,
+                gemstone_number_text,
+                gemstone_type,
+                shape,
+                weight_pcs_raw,
+                price_per_ct_raw,
+                price_per_piece_raw,
+                buying_date,
+                buying_date_raw,
+                balance_pcs,
+                balance_ct,
+                use_date,
+                use_date_raw,
+                owner_name,
+                parsed_weight_ct,
+                parsed_quantity_pcs,
+                parsed_price_per_ct,
+                parsed_price_per_piece
+            )
+            OUTPUT INSERTED.id
+            VALUES (
+                'manual_entry',
+                NULL,
+                @GemstoneNumber,
+                @GemstoneNumberText,
+                @GemstoneType,
+                @Shape,
+                @WeightPcsRaw,
+                @PricePerCtRaw,
+                @PricePerPieceRaw,
+                @BuyingDate,
+                NULL,
+                @BalancePcs,
+                @BalanceCt,
+                NULL,
+                NULL,
+                @OwnerName,
+                @ParsedWeightCt,
+                @ParsedQuantityPcs,
+                @ParsedPricePerCt,
+                @ParsedPricePerPiece
+            );
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        int newId;
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            cmd.Parameters.AddWithValue("@GemstoneNumber", DbValue(gemstoneNumber));
+            cmd.Parameters.AddWithValue("@GemstoneNumberText", DbNullIfEmpty(numberText));
+            cmd.Parameters.AddWithValue("@GemstoneType", type);
+            cmd.Parameters.AddWithValue("@Shape", DbNullIfEmpty(request.Shape));
+            cmd.Parameters.AddWithValue("@WeightPcsRaw", DbNullIfEmpty(request.WeightPcsRaw));
+            cmd.Parameters.AddWithValue("@PricePerCtRaw", DbNullIfEmpty(request.PricePerCtRaw));
+            cmd.Parameters.AddWithValue("@PricePerPieceRaw", DbNullIfEmpty(request.PricePerPieceRaw));
+            cmd.Parameters.AddWithValue("@BuyingDate", DbValue(request.BuyingDate));
+            cmd.Parameters.AddWithValue("@BalancePcs", DbValue(balancePcs));
+            cmd.Parameters.AddWithValue("@BalanceCt", DbValue(balanceCt));
+            cmd.Parameters.AddWithValue("@OwnerName", DbNullIfEmpty(request.OwnerName));
+            cmd.Parameters.AddWithValue("@ParsedWeightCt", DbValue(parsedWeightCt));
+            cmd.Parameters.AddWithValue("@ParsedQuantityPcs", DbValue(parsedQuantityPcs));
+            cmd.Parameters.AddWithValue("@ParsedPricePerCt", DbValue(request.ParsedPricePerCt));
+            cmd.Parameters.AddWithValue("@ParsedPricePerPiece", DbValue(request.ParsedPricePerPiece));
+            newId = Convert.ToInt32(await cmd.ExecuteScalarAsync(cancellationToken) ?? 0);
+        }
+
+        var created = await GetInventoryItemByIdAsync(newId, cancellationToken);
+        if (created is null)
+        {
+            throw new InvalidOperationException("Created inventory item could not be loaded.");
+        }
+
+        return created;
+    }
+
+    public async Task<InventoryItemDetailResponse?> RestockInventoryItemAsync(
+        int id,
+        InventoryRestockRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var additionalPcs = request.AdditionalPcs ?? 0m;
+        var additionalCt = request.AdditionalCt ?? 0m;
+        if (additionalPcs <= 0 && additionalCt <= 0)
+        {
+            throw new ArgumentException("At least one additional stock quantity (pcs or ct) is required.");
+        }
+
+        const string sql = """
+            UPDATE dbo.gem_inventory_items
+            SET
+                balance_pcs = COALESCE(balance_pcs, parsed_quantity_pcs, 0) + @AdditionalPcs,
+                balance_ct = COALESCE(balance_ct, parsed_weight_ct, 0) + @AdditionalCt,
+                parsed_quantity_pcs = COALESCE(parsed_quantity_pcs, balance_pcs, 0) + @AdditionalPcs,
+                parsed_weight_ct = COALESCE(parsed_weight_ct, balance_ct, 0) + @AdditionalCt,
+                buying_date = COALESCE(@BuyingDate, buying_date),
+                owner_name = COALESCE(@OwnerName, owner_name),
+                price_per_ct_raw = COALESCE(@PricePerCtRaw, price_per_ct_raw),
+                price_per_piece_raw = COALESCE(@PricePerPieceRaw, price_per_piece_raw),
+                parsed_price_per_ct = COALESCE(@ParsedPricePerCt, parsed_price_per_ct),
+                parsed_price_per_piece = COALESCE(@ParsedPricePerPiece, parsed_price_per_piece),
+                imported_at_utc = SYSUTCDATETIME()
+            WHERE id = @Id;
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            cmd.Parameters.AddWithValue("@Id", id);
+            cmd.Parameters.AddWithValue("@AdditionalPcs", additionalPcs);
+            cmd.Parameters.AddWithValue("@AdditionalCt", additionalCt);
+            cmd.Parameters.AddWithValue("@BuyingDate", DbValue(request.BuyingDate));
+            cmd.Parameters.AddWithValue("@OwnerName", DbNullIfEmpty(request.OwnerName));
+            cmd.Parameters.AddWithValue("@PricePerCtRaw", DbNullIfEmpty(request.PricePerCtRaw));
+            cmd.Parameters.AddWithValue("@PricePerPieceRaw", DbNullIfEmpty(request.PricePerPieceRaw));
+            cmd.Parameters.AddWithValue("@ParsedPricePerCt", DbValue(request.ParsedPricePerCt));
+            cmd.Parameters.AddWithValue("@ParsedPricePerPiece", DbValue(request.ParsedPricePerPiece));
+            var rows = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            if (rows <= 0)
+            {
+                return null;
+            }
+        }
+
+        return await GetInventoryItemByIdAsync(id, cancellationToken);
+    }
+
     public async Task<PagedResponse<UsageBatchResponse>> GetUsageBatchesAsync(
         string? search,
         string? category,
@@ -650,5 +804,27 @@ public sealed class GemInventorySqlService : IGemInventorySqlService
         var ordinal = GetOrdinal(reader, columnName);
         if (reader.IsDBNull(ordinal)) return null;
         return Convert.ToDateTime(reader.GetValue(ordinal));
+    }
+
+    private static string NormalizeRequired(string? value, string message)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException(message);
+        }
+
+        return value.Trim();
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static object DbValue(object? value) => value ?? DBNull.Value;
+
+    private static object DbNullIfEmpty(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
     }
 }

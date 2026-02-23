@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, BarChart3, ChevronLeft, ChevronRight, Expand, Factory, Gem, History, LogOut, Settings, ShoppingBag, Users, X } from 'lucide-react'
+import { ArrowLeft, BarChart3, ChevronLeft, ChevronRight, Expand, Factory, Gem, History, LogOut, Plus, Settings, ShoppingBag, Users, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { getInventoryItem, getInventoryItems, getInventorySummary } from '../api/client'
+import { createInventoryItem, getInventoryItem, getInventoryItems, getInventorySummary, restockInventoryItem } from '../api/client'
 import type { InventoryItem, InventoryItemDetail, InventorySummary } from '../api/types'
 import { useSession } from '../app/useSession'
 import { AnalyticsPanel } from '../components/dashboard/AnalyticsPanel'
@@ -113,6 +113,64 @@ function formatNumber(value: number | null | undefined, digits = 2): string {
   }
 
   return value.toFixed(digits)
+}
+
+interface NewGemstoneDraft {
+  gemstoneNumberText: string
+  gemstoneType: string
+  shape: string
+  ownerName: string
+  buyingDate: string
+  balanceCt: string
+  balancePcs: string
+  parsedPricePerCt: string
+  parsedPricePerPiece: string
+}
+
+interface RestockGemstoneDraft {
+  inventoryItemId: string
+  additionalCt: string
+  additionalPcs: string
+  buyingDate: string
+  ownerName: string
+  parsedPricePerCt: string
+  parsedPricePerPiece: string
+}
+
+const EMPTY_NEW_GEMSTONE_DRAFT: NewGemstoneDraft = {
+  gemstoneNumberText: '',
+  gemstoneType: '',
+  shape: '',
+  ownerName: '',
+  buyingDate: '',
+  balanceCt: '',
+  balancePcs: '',
+  parsedPricePerCt: '',
+  parsedPricePerPiece: ''
+}
+
+const EMPTY_RESTOCK_DRAFT: RestockGemstoneDraft = {
+  inventoryItemId: '',
+  additionalCt: '',
+  additionalPcs: '',
+  buyingDate: '',
+  ownerName: '',
+  parsedPricePerCt: '',
+  parsedPricePerPiece: ''
+}
+
+function parseOptionalNumber(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed)) {
+    return null
+  }
+
+  return parsed
 }
 
 function InventoryDetailContent({ selectedInventory }: { selectedInventory: InventoryItemDetail }) {
@@ -261,6 +319,11 @@ export function DashboardPage() {
   const [inventoryType, setInventoryType] = useState('all')
   const [inventoryStatus, setInventoryStatus] = useState('all')
   const [selectedInventory, setSelectedInventory] = useState<InventoryItemDetail | null>(null)
+  const [isCreatingGemstone, setIsCreatingGemstone] = useState(false)
+  const [isRestockingGemstone, setIsRestockingGemstone] = useState(false)
+  const [newGemstoneDraft, setNewGemstoneDraft] = useState<NewGemstoneDraft>(EMPTY_NEW_GEMSTONE_DRAFT)
+  const [restockDraft, setRestockDraft] = useState<RestockGemstoneDraft>(EMPTY_RESTOCK_DRAFT)
+  const [isSavingInventoryAction, setIsSavingInventoryAction] = useState(false)
 
   const [isLoadingSummary, setIsLoadingSummary] = useState(true)
   const [isLoadingInventory, setIsLoadingInventory] = useState(true)
@@ -309,46 +372,37 @@ export function DashboardPage() {
     }
   }, [])
 
-  useEffect(() => {
-    if (activeTab !== 'inventory') {
-      return
-    }
-
-    let cancelled = false
+  async function refreshInventoryData(currentSearch: string, currentType: string, currentStatus: string) {
     setIsLoadingInventory(true)
     setErrorMessage(null)
     setInventory([])
     setInventoryTotal(0)
     setInventoryOffset(0)
 
-    void getInventoryItems({
-      search: inventorySearch,
-      type: inventoryType,
-      status: inventoryStatus,
-      limit: INVENTORY_PAGE_SIZE,
-      offset: 0
-    })
-      .then(result => {
-        if (!cancelled) {
-          setInventory(result.items)
-          setInventoryTotal(result.totalCount)
-          setInventoryOffset(result.items.length)
-        }
+    try {
+      const result = await getInventoryItems({
+        search: currentSearch,
+        type: currentType,
+        status: currentStatus,
+        limit: INVENTORY_PAGE_SIZE,
+        offset: 0
       })
-      .catch(() => {
-        if (!cancelled) {
-          setErrorMessage('Unable to load inventory records.')
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoadingInventory(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
+      setInventory(result.items)
+      setInventoryTotal(result.totalCount)
+      setInventoryOffset(result.items.length)
+    } catch {
+      setErrorMessage('Unable to load inventory records.')
+    } finally {
+      setIsLoadingInventory(false)
     }
+  }
+
+  useEffect(() => {
+    if (activeTab !== 'inventory') {
+      return
+    }
+
+    void refreshInventoryData(inventorySearch, inventoryType, inventoryStatus)
   }, [activeTab, inventorySearch, inventoryStatus, inventoryType])
 
   useEffect(() => {
@@ -412,6 +466,95 @@ export function DashboardPage() {
     }
   }
 
+  async function refreshInventorySummary() {
+    try {
+      const result = await getInventorySummary()
+      setSummary(result)
+    } catch {
+      setErrorMessage('Unable to refresh inventory summary.')
+    }
+  }
+
+  async function handleCreateGemstone() {
+    if (!newGemstoneDraft.gemstoneType.trim()) {
+      setErrorMessage('Gemstone type is required.')
+      return
+    }
+
+    setIsSavingInventoryAction(true)
+    setErrorMessage(null)
+
+    try {
+      await createInventoryItem({
+        gemstoneNumberText: newGemstoneDraft.gemstoneNumberText.trim() || null,
+        gemstoneType: newGemstoneDraft.gemstoneType.trim() || null,
+        shape: newGemstoneDraft.shape.trim() || null,
+        ownerName: newGemstoneDraft.ownerName.trim() || null,
+        buyingDate: newGemstoneDraft.buyingDate || null,
+        balanceCt: parseOptionalNumber(newGemstoneDraft.balanceCt),
+        balancePcs: parseOptionalNumber(newGemstoneDraft.balancePcs),
+        parsedWeightCt: parseOptionalNumber(newGemstoneDraft.balanceCt),
+        parsedQuantityPcs: parseOptionalNumber(newGemstoneDraft.balancePcs),
+        parsedPricePerCt: parseOptionalNumber(newGemstoneDraft.parsedPricePerCt),
+        parsedPricePerPiece: parseOptionalNumber(newGemstoneDraft.parsedPricePerPiece),
+        pricePerCtRaw: newGemstoneDraft.parsedPricePerCt.trim() || null,
+        pricePerPieceRaw: newGemstoneDraft.parsedPricePerPiece.trim() || null
+      })
+
+      setNewGemstoneDraft(EMPTY_NEW_GEMSTONE_DRAFT)
+      setIsCreatingGemstone(false)
+      await Promise.all([
+        refreshInventoryData(inventorySearch, inventoryType, inventoryStatus),
+        refreshInventorySummary()
+      ])
+    } catch {
+      setErrorMessage('Unable to create gemstone.')
+    } finally {
+      setIsSavingInventoryAction(false)
+    }
+  }
+
+  async function handleRestockGemstone() {
+    const inventoryItemId = Number(restockDraft.inventoryItemId)
+    if (!Number.isInteger(inventoryItemId) || inventoryItemId <= 0) {
+      setErrorMessage('Select a valid gemstone to restock.')
+      return
+    }
+
+    if (!parseOptionalNumber(restockDraft.additionalCt) && !parseOptionalNumber(restockDraft.additionalPcs)) {
+      setErrorMessage('Enter additional CT or PCS to restock.')
+      return
+    }
+
+    setIsSavingInventoryAction(true)
+    setErrorMessage(null)
+
+    try {
+      const updated = await restockInventoryItem(inventoryItemId, {
+        additionalCt: parseOptionalNumber(restockDraft.additionalCt),
+        additionalPcs: parseOptionalNumber(restockDraft.additionalPcs),
+        buyingDate: restockDraft.buyingDate || null,
+        ownerName: restockDraft.ownerName.trim() || null,
+        parsedPricePerCt: parseOptionalNumber(restockDraft.parsedPricePerCt),
+        parsedPricePerPiece: parseOptionalNumber(restockDraft.parsedPricePerPiece),
+        pricePerCtRaw: restockDraft.parsedPricePerCt.trim() || null,
+        pricePerPieceRaw: restockDraft.parsedPricePerPiece.trim() || null
+      })
+
+      setRestockDraft(EMPTY_RESTOCK_DRAFT)
+      setIsRestockingGemstone(false)
+      await Promise.all([
+        refreshInventoryData(inventorySearch, inventoryType, inventoryStatus),
+        refreshInventorySummary()
+      ])
+      setSelectedInventory(updated)
+    } catch {
+      setErrorMessage('Unable to restock gemstone.')
+    } finally {
+      setIsSavingInventoryAction(false)
+    }
+  }
+
   const uniqueGemTypes = useMemo(() => {
     const values = new Set<string>()
     for (const item of inventory) {
@@ -454,6 +597,28 @@ export function DashboardPage() {
           <h3>Gemstone Inventory</h3>
           <p>{inventoryTotal.toLocaleString()} records loaded from Azure SQL</p>
         </div>
+        <div className="detail-actions-row">
+          <button type="button" className="secondary-btn" onClick={() => {
+            setIsRestockingGemstone(false)
+            setIsCreatingGemstone(current => !current)
+          }}>
+            {isCreatingGemstone ? 'Cancel' : (
+              <>
+                <Plus size={14} />
+                New Gemstone
+              </>
+            )}
+          </button>
+          <button type="button" className="secondary-btn" onClick={() => {
+            setIsCreatingGemstone(false)
+            setIsRestockingGemstone(current => !current)
+          }}>
+            {isRestockingGemstone ? 'Cancel' : 'Restock Existing'}
+          </button>
+        </div>
+      </div>
+
+      <>
         <div className="filter-grid">
           <input
             placeholder="Search type, shape, owner, or code"
@@ -475,15 +640,113 @@ export function DashboardPage() {
             <option value="out-of-stock">Out of stock</option>
           </select>
         </div>
-      </div>
 
-      {isLoadingInventory ? (
-        <p className="panel-placeholder">Loading inventory data...</p>
-      ) : inventory.length === 0 ? (
-        <p className="panel-placeholder">No gemstones match the current filters.</p>
-      ) : (
-        <>
-          <div className="usage-table-wrap">
+        {isCreatingGemstone ? (
+          <div className="crm-form-grid">
+            <label>
+              Gem Code / Number
+              <input value={newGemstoneDraft.gemstoneNumberText} onChange={event => setNewGemstoneDraft(current => ({ ...current, gemstoneNumberText: event.target.value }))} />
+            </label>
+            <label>
+              Gemstone Type
+              <input value={newGemstoneDraft.gemstoneType} onChange={event => setNewGemstoneDraft(current => ({ ...current, gemstoneType: event.target.value }))} />
+            </label>
+            <label>
+              Shape
+              <input value={newGemstoneDraft.shape} onChange={event => setNewGemstoneDraft(current => ({ ...current, shape: event.target.value }))} />
+            </label>
+            <label>
+              Owner
+              <input value={newGemstoneDraft.ownerName} onChange={event => setNewGemstoneDraft(current => ({ ...current, ownerName: event.target.value }))} />
+            </label>
+            <label>
+              Buying Date
+              <input type="date" value={newGemstoneDraft.buyingDate} onChange={event => setNewGemstoneDraft(current => ({ ...current, buyingDate: event.target.value }))} />
+            </label>
+            <label>
+              Balance (CT)
+              <input value={newGemstoneDraft.balanceCt} onChange={event => setNewGemstoneDraft(current => ({ ...current, balanceCt: event.target.value }))} />
+            </label>
+            <label>
+              Balance (PCS)
+              <input value={newGemstoneDraft.balancePcs} onChange={event => setNewGemstoneDraft(current => ({ ...current, balancePcs: event.target.value }))} />
+            </label>
+            <label>
+              Price Per CT
+              <input value={newGemstoneDraft.parsedPricePerCt} onChange={event => setNewGemstoneDraft(current => ({ ...current, parsedPricePerCt: event.target.value }))} />
+            </label>
+            <label>
+              Price Per Piece
+              <input value={newGemstoneDraft.parsedPricePerPiece} onChange={event => setNewGemstoneDraft(current => ({ ...current, parsedPricePerPiece: event.target.value }))} />
+            </label>
+            <div className="crm-form-actions crm-form-span">
+              <button type="button" className="secondary-btn" onClick={() => setNewGemstoneDraft(EMPTY_NEW_GEMSTONE_DRAFT)} disabled={isSavingInventoryAction}>
+                Reset
+              </button>
+              <button type="button" className="primary-btn" onClick={() => void handleCreateGemstone()} disabled={isSavingInventoryAction}>
+                {isSavingInventoryAction ? 'Saving...' : 'Save Gemstone'}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {isRestockingGemstone ? (
+          <div className="crm-form-grid">
+              <label className="crm-form-span">
+                Existing Gemstone
+                <select value={restockDraft.inventoryItemId} onChange={event => setRestockDraft(current => ({ ...current, inventoryItemId: event.target.value }))}>
+                  <option value="">Select gemstone</option>
+                  {inventory.map(item => (
+                    <option key={item.id} value={String(item.id)}>
+                      {(item.gemstoneNumber ?? item.gemstoneNumberText ?? item.id)}
+                      {' • '}
+                      {item.gemstoneType ?? '-'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Additional CT
+                <input value={restockDraft.additionalCt} onChange={event => setRestockDraft(current => ({ ...current, additionalCt: event.target.value }))} />
+              </label>
+              <label>
+                Additional PCS
+                <input value={restockDraft.additionalPcs} onChange={event => setRestockDraft(current => ({ ...current, additionalPcs: event.target.value }))} />
+              </label>
+              <label>
+                Buying Date
+                <input type="date" value={restockDraft.buyingDate} onChange={event => setRestockDraft(current => ({ ...current, buyingDate: event.target.value }))} />
+              </label>
+              <label>
+                Owner (optional override)
+                <input value={restockDraft.ownerName} onChange={event => setRestockDraft(current => ({ ...current, ownerName: event.target.value }))} />
+              </label>
+              <label>
+                Price Per CT (optional override)
+                <input value={restockDraft.parsedPricePerCt} onChange={event => setRestockDraft(current => ({ ...current, parsedPricePerCt: event.target.value }))} />
+              </label>
+              <label>
+                Price Per Piece (optional override)
+                <input value={restockDraft.parsedPricePerPiece} onChange={event => setRestockDraft(current => ({ ...current, parsedPricePerPiece: event.target.value }))} />
+              </label>
+              <div className="crm-form-actions crm-form-span">
+                <button type="button" className="secondary-btn" onClick={() => setRestockDraft(EMPTY_RESTOCK_DRAFT)} disabled={isSavingInventoryAction}>
+                  Reset
+                </button>
+                <button type="button" className="primary-btn" onClick={() => void handleRestockGemstone()} disabled={isSavingInventoryAction}>
+                  {isSavingInventoryAction ? 'Saving...' : 'Apply Restock'}
+                </button>
+              </div>
+          </div>
+        ) : null}
+
+        {isLoadingInventory ? (
+          <p className="panel-placeholder">Loading inventory data...</p>
+        ) : inventory.length === 0 ? (
+          <p className="panel-placeholder">No gemstones match the current filters.</p>
+        ) : (
+          <>
+            <div className="usage-table-wrap">
             <table className="usage-table">
               <thead>
                 <tr>
@@ -525,9 +788,9 @@ export function DashboardPage() {
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
 
-          <div className="table-footer">
+            <div className="table-footer">
             <p>
               Showing
               {' '}
@@ -544,9 +807,10 @@ export function DashboardPage() {
                 {isLoadingMoreInventory ? 'Loading...' : 'See more'}
               </button>
             ) : null}
-          </div>
-        </>
-      )}
+            </div>
+          </>
+        )}
+      </>
     </section>
   )
 

@@ -1,5 +1,7 @@
 using System.Net;
+using System.Text.Json;
 using backend.Services;
+using backend.Models;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 
@@ -7,6 +9,11 @@ namespace backend.Functions;
 
 public sealed class GemInventoryFunctions
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     private readonly IGemInventorySqlService _inventoryService;
 
     public GemInventoryFunctions(IGemInventorySqlService inventoryService)
@@ -59,6 +66,60 @@ public sealed class GemInventoryFunctions
         return response;
     }
 
+    [Function("CreateInventoryItem")]
+    public async Task<HttpResponseData> CreateInventoryItem(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "inventory/gemstones")] HttpRequestData req)
+    {
+        var body = await DeserializeBodyAsync<InventoryItemCreateRequest>(req);
+        if (body is null)
+        {
+            return await BadRequestAsync(req, "Invalid inventory item payload.");
+        }
+
+        try
+        {
+            var created = await _inventoryService.CreateInventoryItemAsync(body, req.FunctionContext.CancellationToken);
+            var response = req.CreateResponse(HttpStatusCode.Created);
+            await response.WriteAsJsonAsync(created);
+            return response;
+        }
+        catch (ArgumentException ex)
+        {
+            return await BadRequestAsync(req, ex.Message);
+        }
+    }
+
+    [Function("RestockInventoryItem")]
+    public async Task<HttpResponseData> RestockInventoryItem(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "inventory/gemstones/{id:int}/restock")] HttpRequestData req,
+        int id)
+    {
+        var body = await DeserializeBodyAsync<InventoryRestockRequest>(req);
+        if (body is null)
+        {
+            return await BadRequestAsync(req, "Invalid restock payload.");
+        }
+
+        try
+        {
+            var updated = await _inventoryService.RestockInventoryItemAsync(id, body, req.FunctionContext.CancellationToken);
+            if (updated is null)
+            {
+                var notFound = req.CreateResponse(HttpStatusCode.NotFound);
+                await notFound.WriteAsJsonAsync(new { error = "Inventory item not found." });
+                return notFound;
+            }
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(updated);
+            return response;
+        }
+        catch (ArgumentException ex)
+        {
+            return await BadRequestAsync(req, ex.Message);
+        }
+    }
+
     [Function("GetUsageBatches")]
     public async Task<HttpResponseData> GetUsageBatches(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "inventory/usage")] HttpRequestData req)
@@ -100,5 +161,17 @@ public sealed class GemInventoryFunctions
             return parsed;
         }
         return fallback;
+    }
+
+    private static async Task<T?> DeserializeBodyAsync<T>(HttpRequestData req)
+    {
+        return await JsonSerializer.DeserializeAsync<T>(req.Body, JsonOptions);
+    }
+
+    private static async Task<HttpResponseData> BadRequestAsync(HttpRequestData req, string message)
+    {
+        var response = req.CreateResponse(HttpStatusCode.BadRequest);
+        await response.WriteAsJsonAsync(new { error = message });
+        return response;
     }
 }

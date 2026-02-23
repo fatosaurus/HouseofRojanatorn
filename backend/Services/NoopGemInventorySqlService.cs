@@ -19,6 +19,12 @@ public sealed class NoopGemInventorySqlService : IGemInventorySqlService
     public Task<InventoryItemDetailResponse?> GetInventoryItemByIdAsync(int id, CancellationToken cancellationToken = default)
         => Task.FromResult<InventoryItemDetailResponse?>(null);
 
+    public Task<InventoryItemDetailResponse> CreateInventoryItemAsync(InventoryItemCreateRequest request, CancellationToken cancellationToken = default)
+        => Task.FromException<InventoryItemDetailResponse>(new InvalidOperationException("SQL connection is not configured."));
+
+    public Task<InventoryItemDetailResponse?> RestockInventoryItemAsync(int id, InventoryRestockRequest request, CancellationToken cancellationToken = default)
+        => Task.FromResult<InventoryItemDetailResponse?>(null);
+
     public Task<PagedResponse<UsageBatchResponse>> GetUsageBatchesAsync(
         string? search,
         string? category,

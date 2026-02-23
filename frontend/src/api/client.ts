@@ -10,7 +10,9 @@ import type {
   InviteDetails,
   InviteResponse,
   InventoryItem,
+  InventoryItemCreateRequest,
   InventoryItemDetail,
+  InventoryRestockRequest,
   InventoryManufacturingActivity,
   InventorySummary,
   InventoryUsageActivity,
@@ -696,6 +698,22 @@ export async function getInventoryItems(query: InventoryQuery): Promise<PagedRes
 
 export async function getInventoryItem(id: number): Promise<InventoryItemDetail> {
   const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/inventory/gemstones/${id}`)
+  return mapInventoryItemDetail(response)
+}
+
+export async function createInventoryItem(payload: InventoryItemCreateRequest): Promise<InventoryItemDetail> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/inventory/gemstones`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+  return mapInventoryItemDetail(response)
+}
+
+export async function restockInventoryItem(id: number, payload: InventoryRestockRequest): Promise<InventoryItemDetail> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/inventory/gemstones/${id}/restock`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
   return mapInventoryItemDetail(response)
 }
 
