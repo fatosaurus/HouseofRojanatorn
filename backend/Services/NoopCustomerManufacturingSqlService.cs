@@ -118,6 +118,8 @@ public sealed class NoopCustomerManufacturingSqlService : ICustomerManufacturing
                     IsSystem = true
                 }
             ],
+            PieceTypeOptions = ManufacturingPieceTypes.Defaults,
+            StatusOptions = ManufacturingStatuses.Defaults,
             MaterialOptions = ["Silver", "10K Gold", "18K Gold"],
             MetalPlatingOptions = ["White Gold", "Gold", "Rose Gold"]
         });

@@ -46,8 +46,8 @@ public static class ManufacturingStatuses
 
 public static class ManufacturingPieceTypes
 {
-    public static readonly IReadOnlySet<string> Allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
+    public static readonly IReadOnlyList<string> Defaults =
+    [
         "earrings",
         "bracelet",
         "choker",
@@ -56,7 +56,7 @@ public static class ManufacturingPieceTypes
         "ring",
         "pendant",
         "other",
-    };
+    ];
 
     public static string? NormalizeOrNull(string? value)
     {
@@ -65,8 +65,7 @@ public static class ManufacturingPieceTypes
             return null;
         }
 
-        var normalized = value.Trim().ToLowerInvariant();
-        return Allowed.Contains(normalized) ? normalized : null;
+        return value.Trim();
     }
 }
 
@@ -338,6 +337,8 @@ public sealed class ManufacturingSettingsResponse
     public IReadOnlyList<ManufacturingCustomFieldResponse> Fields { get; init; } = [];
     public IReadOnlyList<ManufacturingPersonResponse> Designers { get; init; } = [];
     public IReadOnlyList<ManufacturingPersonResponse> Craftsmen { get; init; } = [];
+    public IReadOnlyList<string> PieceTypeOptions { get; init; } = [];
+    public IReadOnlyList<string> StatusOptions { get; init; } = [];
     public IReadOnlyList<string> MaterialOptions { get; init; } = [];
     public IReadOnlyList<string> MetalPlatingOptions { get; init; } = [];
 }
@@ -367,6 +368,8 @@ public sealed class ManufacturingSettingsUpdateRequest
 {
     public IReadOnlyList<ManufacturingProcessStepUpsertRequest>? Steps { get; init; }
     public IReadOnlyList<ManufacturingCustomFieldUpsertRequest>? Fields { get; init; }
+    public IReadOnlyList<string>? PieceTypeOptions { get; init; }
+    public IReadOnlyList<string>? StatusOptions { get; init; }
     public IReadOnlyList<string>? MaterialOptions { get; init; }
     public IReadOnlyList<string>? MetalPlatingOptions { get; init; }
 }

@@ -29,7 +29,7 @@ function slugify(value: string): string {
 
 const FIELD_TYPES: ManufacturingCustomField['fieldType'][] = ['text', 'textarea', 'number', 'date', 'select']
 type WorkforceRole = 'designer' | 'craftsman'
-type SettingsSection = 'profile' | 'users' | 'designers' | 'craftsmen' | 'steps' | 'fields'
+type SettingsSection = 'profile' | 'users' | 'designers' | 'craftsmen' | 'steps' | 'fields' | 'options'
 
 interface EditablePerson {
   id: number
@@ -130,6 +130,8 @@ export function SettingsPanel() {
 
   const [steps, setSteps] = useState<ManufacturingProcessStep[]>([])
   const [fields, setFields] = useState<ManufacturingCustomField[]>([])
+  const [pieceTypeOptionsInput, setPieceTypeOptionsInput] = useState('earrings, bracelet, choker, necklace, brooch, ring, pendant, other')
+  const [statusOptionsInput, setStatusOptionsInput] = useState('approved, sent_to_craftsman, internal_setting_qc, diamond_sorting, stone_setting, plating, final_piece_qc, complete_piece, ready_for_sale, sold')
   const [materialOptionsInput, setMaterialOptionsInput] = useState('Silver, 10K Gold, 18K Gold')
   const [metalPlatingOptionsInput, setMetalPlatingOptionsInput] = useState('White Gold, Gold, Rose Gold')
   const [designers, setDesigners] = useState<EditablePerson[]>([])
@@ -196,6 +198,10 @@ export function SettingsPanel() {
     fields: {
       title: 'Manufacturing Fields',
       subtitle: 'Control dynamic fields shown on manufacturing forms.'
+    },
+    options: {
+      title: 'Dropdown Options',
+      subtitle: 'Manage option sets used by piece type, status, material, and metal plating.'
     }
   }
 
@@ -207,6 +213,8 @@ export function SettingsPanel() {
       const settings = await getManufacturingSettings()
       setSteps(settings.steps)
       setFields(settings.fields)
+      setPieceTypeOptionsInput((settings.pieceTypeOptions.length > 0 ? settings.pieceTypeOptions : ['earrings', 'bracelet', 'choker', 'necklace', 'brooch', 'ring', 'pendant', 'other']).join(', '))
+      setStatusOptionsInput((settings.statusOptions.length > 0 ? settings.statusOptions : ['approved', 'sent_to_craftsman', 'internal_setting_qc', 'diamond_sorting', 'stone_setting', 'plating', 'final_piece_qc', 'complete_piece', 'ready_for_sale', 'sold']).join(', '))
       setMaterialOptionsInput((settings.materialOptions.length > 0 ? settings.materialOptions : ['Silver', '10K Gold', '18K Gold']).join(', '))
       setMetalPlatingOptionsInput((settings.metalPlatingOptions.length > 0 ? settings.metalPlatingOptions : ['White Gold', 'Gold', 'Rose Gold']).join(', '))
       setDesigners(mapEditablePeople('designer', settings.designers))
@@ -252,7 +260,8 @@ export function SettingsPanel() {
   const onManufacturingSection = activeSection === 'designers' ||
     activeSection === 'craftsmen' ||
     activeSection === 'steps' ||
-    activeSection === 'fields'
+    activeSection === 'fields' ||
+    activeSection === 'options'
 
   function addStep() {
     setSteps(current => [
@@ -389,6 +398,14 @@ export function SettingsPanel() {
           isActive: field.isActive,
           options: field.fieldType === 'select' ? field.options : []
         })),
+        pieceTypeOptions: pieceTypeOptionsInput
+          .split(',')
+          .map(option => option.trim())
+          .filter(option => option.length > 0),
+        statusOptions: statusOptionsInput
+          .split(',')
+          .map(option => option.trim())
+          .filter(option => option.length > 0),
         materialOptions: materialOptionsInput
           .split(',')
           .map(option => option.trim())
@@ -768,26 +785,6 @@ export function SettingsPanel() {
   function renderFields() {
     return (
       <>
-        <div className="crm-form-grid settings-inline-form">
-          <label className="crm-form-span">
-            Material Selections
-            <input
-              value={materialOptionsInput}
-              placeholder="Silver, 10K Gold, 18K Gold"
-              onChange={event => setMaterialOptionsInput(event.target.value)}
-            />
-          </label>
-          <label className="crm-form-span">
-            Metal Plating Selections
-            <input
-              value={metalPlatingOptionsInput}
-              placeholder="White Gold, Gold, Rose Gold"
-              onChange={event => setMetalPlatingOptionsInput(event.target.value)}
-            />
-          </label>
-          <p className="panel-placeholder crm-form-span">These option lists are used in manufacturing detail dropdown controls.</p>
-        </div>
-
         <div className="card-head settings-subhead">
           <h4>Manufacturing Fields</h4>
           <button type="button" className="secondary-btn" onClick={addField}>
@@ -893,6 +890,73 @@ export function SettingsPanel() {
     )
   }
 
+  function renderOptions() {
+    return (
+      <>
+        <div className="card-head settings-subhead">
+          <h4>Form Option Sets</h4>
+        </div>
+        <div className="usage-table-wrap">
+          <table className="usage-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Label</th>
+                <th>Options (comma separated)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>piece_type</td>
+                <td>Piece Type</td>
+                <td>
+                  <input
+                    value={pieceTypeOptionsInput}
+                    placeholder="earrings, bracelet, choker, necklace..."
+                    onChange={event => setPieceTypeOptionsInput(event.target.value)}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <td>status</td>
+                <td>Status</td>
+                <td>
+                  <input
+                    value={statusOptionsInput}
+                    placeholder="approved, sent_to_craftsman..."
+                    onChange={event => setStatusOptionsInput(event.target.value)}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <td>material</td>
+                <td>Material</td>
+                <td>
+                  <input
+                    value={materialOptionsInput}
+                    placeholder="Silver, 10K Gold, 18K Gold"
+                    onChange={event => setMaterialOptionsInput(event.target.value)}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <td>metal_plating</td>
+                <td>Metal Plating</td>
+                <td>
+                  <input
+                    value={metalPlatingOptionsInput}
+                    placeholder="White Gold, Gold, Rose Gold"
+                    onChange={event => setMetalPlatingOptionsInput(event.target.value)}
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </>
+    )
+  }
+
   function renderActiveSection() {
     switch (activeSection) {
       case 'profile':
@@ -907,6 +971,8 @@ export function SettingsPanel() {
         return renderSteps()
       case 'fields':
         return renderFields()
+      case 'options':
+        return renderOptions()
       default:
         return null
     }
@@ -957,6 +1023,9 @@ export function SettingsPanel() {
           </button>
           <button type="button" className={activeSection === 'fields' ? 'active' : ''} onClick={() => setActiveSection('fields')}>
             Fields
+          </button>
+          <button type="button" className={activeSection === 'options' ? 'active' : ''} onClick={() => setActiveSection('options')}>
+            Options
           </button>
         </div>
       </aside>
