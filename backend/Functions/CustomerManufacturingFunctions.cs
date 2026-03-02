@@ -170,6 +170,169 @@ public sealed class CustomerManufacturingFunctions
         return response;
     }
 
+    [Function("GetCustomerPurchasedPhotos")]
+    public async Task<HttpResponseData> GetCustomerPurchasedPhotos(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "customers/{id:guid}/purchased-photos")] HttpRequestData req,
+        Guid id)
+    {
+        var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+        var limit = ParseInt(query["limit"], 180);
+
+        var customer = await _service.GetCustomerByIdAsync(id, req.FunctionContext.CancellationToken);
+        if (customer is null)
+        {
+            return await NotFoundAsync(req, "Customer not found.");
+        }
+
+        var photos = await _service.GetCustomerPurchasedProductPhotosAsync(id, limit, req.FunctionContext.CancellationToken);
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(photos);
+        return response;
+    }
+
+    [Function("GetSuppliers")]
+    public async Task<HttpResponseData> GetSuppliers(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "suppliers")] HttpRequestData req)
+    {
+        var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+        var search = query["search"];
+        var limit = ParseInt(query["limit"], 100);
+        var offset = ParseInt(query["offset"], 0);
+
+        var suppliers = await _service.GetSuppliersAsync(search, limit, offset, req.FunctionContext.CancellationToken);
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(suppliers);
+        return response;
+    }
+
+    [Function("GetSupplierById")]
+    public async Task<HttpResponseData> GetSupplierById(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "suppliers/{id:guid}")] HttpRequestData req,
+        Guid id)
+    {
+        var supplier = await _service.GetSupplierByIdAsync(id, req.FunctionContext.CancellationToken);
+        if (supplier is null)
+        {
+            return await NotFoundAsync(req, "Supplier not found.");
+        }
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(supplier);
+        return response;
+    }
+
+    [Function("CreateSupplier")]
+    public async Task<HttpResponseData> CreateSupplier(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "suppliers")] HttpRequestData req)
+    {
+        var body = await DeserializeBodyAsync<SupplierUpsertRequest>(req);
+        if (body is null)
+        {
+            return await BadRequestAsync(req, "Invalid supplier payload.");
+        }
+
+        try
+        {
+            var created = await _service.CreateSupplierAsync(body, req.FunctionContext.CancellationToken);
+            var response = req.CreateResponse(HttpStatusCode.Created);
+            await response.WriteAsJsonAsync(created);
+            return response;
+        }
+        catch (ArgumentException ex)
+        {
+            return await BadRequestAsync(req, ex.Message);
+        }
+    }
+
+    [Function("UpdateSupplier")]
+    public async Task<HttpResponseData> UpdateSupplier(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "suppliers/{id:guid}")] HttpRequestData req,
+        Guid id)
+    {
+        var body = await DeserializeBodyAsync<SupplierUpsertRequest>(req);
+        if (body is null)
+        {
+            return await BadRequestAsync(req, "Invalid supplier payload.");
+        }
+
+        try
+        {
+            var updated = await _service.UpdateSupplierAsync(id, body, req.FunctionContext.CancellationToken);
+            if (updated is null)
+            {
+                return await NotFoundAsync(req, "Supplier not found.");
+            }
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(updated);
+            return response;
+        }
+        catch (ArgumentException ex)
+        {
+            return await BadRequestAsync(req, ex.Message);
+        }
+    }
+
+    [Function("DeleteSupplier")]
+    public async Task<HttpResponseData> DeleteSupplier(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "suppliers/{id:guid}")] HttpRequestData req,
+        Guid id)
+    {
+        var deleted = await _service.DeleteSupplierAsync(id, req.FunctionContext.CancellationToken);
+        if (!deleted)
+        {
+            return await NotFoundAsync(req, "Supplier not found.");
+        }
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { success = true });
+        return response;
+    }
+
+    [Function("GetSupplierPurchases")]
+    public async Task<HttpResponseData> GetSupplierPurchases(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "suppliers/{id:guid}/purchases")] HttpRequestData req,
+        Guid id)
+    {
+        var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+        var limit = ParseInt(query["limit"], 150);
+
+        var supplier = await _service.GetSupplierByIdAsync(id, req.FunctionContext.CancellationToken);
+        if (supplier is null)
+        {
+            return await NotFoundAsync(req, "Supplier not found.");
+        }
+
+        var purchases = await _service.GetSupplierPurchaseHistoryAsync(id, limit, req.FunctionContext.CancellationToken);
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(purchases);
+        return response;
+    }
+
+    [Function("CreateSupplierPurchase")]
+    public async Task<HttpResponseData> CreateSupplierPurchase(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "suppliers/{id:guid}/purchases")] HttpRequestData req,
+        Guid id)
+    {
+        var body = await DeserializeBodyAsync<SupplierPurchaseUpsertRequest>(req);
+        if (body is null)
+        {
+            return await BadRequestAsync(req, "Invalid supplier purchase payload.");
+        }
+
+        try
+        {
+            var created = await _service.CreateSupplierPurchaseHistoryAsync(id, body, req.FunctionContext.CancellationToken);
+            var response = req.CreateResponse(HttpStatusCode.Created);
+            await response.WriteAsJsonAsync(created);
+            return response;
+        }
+        catch (ArgumentException ex)
+        {
+            return await BadRequestAsync(req, ex.Message);
+        }
+    }
+
     [Function("GetPlatformActivity")]
     public async Task<HttpResponseData> GetPlatformActivity(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "activity")] HttpRequestData req)

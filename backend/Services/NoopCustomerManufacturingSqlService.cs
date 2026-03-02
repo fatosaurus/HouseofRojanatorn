@@ -25,6 +25,33 @@ public sealed class NoopCustomerManufacturingSqlService : ICustomerManufacturing
     public Task<IReadOnlyList<CustomerActivityResponse>> GetCustomerActivityAsync(Guid customerId, int limit, CancellationToken cancellationToken = default)
         => Task.FromResult<IReadOnlyList<CustomerActivityResponse>>([]);
 
+    public Task<IReadOnlyList<CustomerPurchasedPhotoResponse>> GetCustomerPurchasedProductPhotosAsync(
+        Guid customerId,
+        int limit,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<CustomerPurchasedPhotoResponse>>([]);
+
+    public Task<PagedResponse<SupplierResponse>> GetSuppliersAsync(string? search, int limit, int offset, CancellationToken cancellationToken = default)
+        => Task.FromResult(new PagedResponse<SupplierResponse>([], 0, Math.Clamp(limit, 1, 200), Math.Max(offset, 0)));
+
+    public Task<SupplierResponse?> GetSupplierByIdAsync(Guid supplierId, CancellationToken cancellationToken = default)
+        => Task.FromResult<SupplierResponse?>(null);
+
+    public Task<SupplierResponse> CreateSupplierAsync(SupplierUpsertRequest request, CancellationToken cancellationToken = default)
+        => Task.FromException<SupplierResponse>(new InvalidOperationException("SQL connection is not configured."));
+
+    public Task<SupplierResponse?> UpdateSupplierAsync(Guid supplierId, SupplierUpsertRequest request, CancellationToken cancellationToken = default)
+        => Task.FromResult<SupplierResponse?>(null);
+
+    public Task<bool> DeleteSupplierAsync(Guid supplierId, CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
+
+    public Task<IReadOnlyList<SupplierPurchaseHistoryResponse>> GetSupplierPurchaseHistoryAsync(Guid supplierId, int limit, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<SupplierPurchaseHistoryResponse>>([]);
+
+    public Task<SupplierPurchaseHistoryResponse> CreateSupplierPurchaseHistoryAsync(Guid supplierId, SupplierPurchaseUpsertRequest request, CancellationToken cancellationToken = default)
+        => Task.FromException<SupplierPurchaseHistoryResponse>(new InvalidOperationException("SQL connection is not configured."));
+
     public Task<PagedResponse<PlatformActivityLogResponse>> GetPlatformActivityAsync(
         string? search,
         string? category,

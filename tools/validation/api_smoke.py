@@ -171,6 +171,50 @@ def main() -> int:
     expect(status == 200, f'GET /customers/{{id}}/activity expected 200, got {status}: {customer_activity}')
     expect(isinstance(customer_activity, list), '/customers/{id}/activity response must be array')
 
+    status, suppliers_page = http_json('GET', f'{base_url}/suppliers?limit=5&offset=0', token=token)
+    expect(status == 200, f'GET /suppliers expected 200, got {status}: {suppliers_page}')
+    expect(isinstance(suppliers_page, dict), '/suppliers response must be object')
+    suppliers_items = pick(suppliers_page, 'items', 'Items')
+    expect(isinstance(suppliers_items, list), '/suppliers.items must be array')
+
+    supplier_payload = {
+        'name': f'Smoke Supplier {smoke_id}',
+        'contactName': 'Supplier QA',
+        'email': f'supplier.{smoke_id}@example.local',
+        'phone': '+66-811111111',
+        'notes': 'Created by API smoke'
+    }
+    status, supplier_created = http_json('POST', f'{base_url}/suppliers', token=token, body=supplier_payload)
+    expect(status == 201, f'POST /suppliers expected 201, got {status}: {supplier_created}')
+    expect(isinstance(supplier_created, dict), '/suppliers POST response must be object')
+    supplier_id = pick(supplier_created, 'id', 'Id')
+    expect(isinstance(supplier_id, str) and len(supplier_id) >= 32, 'Created supplier id must be string guid')
+
+    status, supplier_detail = http_json('GET', f'{base_url}/suppliers/{supplier_id}', token=token)
+    expect(status == 200, f'GET /suppliers/{{id}} expected 200, got {status}: {supplier_detail}')
+    expect(isinstance(supplier_detail, dict), '/suppliers/{id} response must be object')
+
+    supplier_purchase_payload = {
+        'purchaseDate': dt.datetime.now(dt.timezone.utc).date().isoformat(),
+        'referenceNo': f'SMOKE-{smoke_id[-8:]}',
+        'description': 'Smoke supplier purchase',
+        'totalAmount': 1234.50,
+        'currencyCode': 'THB',
+        'notes': 'Smoke purchase note'
+    }
+    status, supplier_purchase = http_json(
+        'POST',
+        f'{base_url}/suppliers/{supplier_id}/purchases',
+        token=token,
+        body=supplier_purchase_payload
+    )
+    expect(status == 201, f'POST /suppliers/{{id}}/purchases expected 201, got {status}: {supplier_purchase}')
+    expect(isinstance(supplier_purchase, dict), '/suppliers/{id}/purchases POST response must be object')
+
+    status, supplier_purchases = http_json('GET', f'{base_url}/suppliers/{supplier_id}/purchases?limit=10', token=token)
+    expect(status == 200, f'GET /suppliers/{{id}}/purchases expected 200, got {status}: {supplier_purchases}')
+    expect(isinstance(supplier_purchases, list), '/suppliers/{id}/purchases response must be array')
+
     status, manufacturing_page = http_json('GET', f'{base_url}/manufacturing?limit=5&offset=0', token=token)
     expect(status == 200, f'GET /manufacturing expected 200, got {status}: {manufacturing_page}')
     expect(isinstance(manufacturing_page, dict), '/manufacturing response must be object')

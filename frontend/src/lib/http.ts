@@ -1,4 +1,4 @@
-import { getAccessToken } from '../app/session-storage'
+import { clearPersistedSession, getAccessToken } from '../app/session-storage'
 
 export class HttpError extends Error {
   readonly status: number
@@ -30,6 +30,12 @@ export async function fetchJson<T>(input: RequestInfo | URL, init?: FetchJsonIni
 
   if (!response.ok) {
     const text = await response.text()
+    if (response.status === 401 && !init?.skipAuth) {
+      clearPersistedSession()
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        window.location.assign('/login')
+      }
+    }
     throw new HttpError(response.status, text || response.statusText)
   }
 
