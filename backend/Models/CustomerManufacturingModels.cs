@@ -107,6 +107,7 @@ public sealed class CustomerResponse
     public string? Address { get; init; }
     public string? Notes { get; init; }
     public string? PhotoUrl { get; init; }
+    public IReadOnlyList<string> Photos { get; init; } = [];
     public DateTime? CustomerSince { get; init; }
     public DateTime CreatedAtUtc { get; init; }
     public DateTime UpdatedAtUtc { get; init; }
@@ -123,6 +124,7 @@ public sealed class CustomerUpsertRequest
     public string? Address { get; init; }
     public string? Notes { get; init; }
     public string? PhotoUrl { get; init; }
+    public IReadOnlyList<string>? Photos { get; init; }
     public DateTime? CustomerSince { get; init; }
 }
 
@@ -141,6 +143,86 @@ public sealed class CustomerActivityResponse
     public DateTime ActivityAtUtc { get; init; }
     public string? CraftsmanName { get; init; }
     public string? Notes { get; init; }
+}
+
+public sealed class CustomerPurchasedPhotoResponse
+{
+    public int ProjectId { get; init; }
+    public string ManufacturingCode { get; init; } = string.Empty;
+    public string PieceName { get; init; } = string.Empty;
+    public DateTime? SoldAt { get; init; }
+    public string PhotoUrl { get; init; } = string.Empty;
+}
+
+public sealed class SupplierResponse
+{
+    public Guid Id { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public string? ContactName { get; init; }
+    public string? OrganizationName { get; init; }
+    public string? BranchName { get; init; }
+    public string? Email { get; init; }
+    public string? Phone { get; init; }
+    public string? Address { get; init; }
+    public string? TaxId { get; init; }
+    public string? SourceChannel { get; init; }
+    public string? ShippingAddress { get; init; }
+    public string? ShippingEmail { get; init; }
+    public string? ShippingPhone { get; init; }
+    public string? Notes { get; init; }
+    public DateTime CreatedAtUtc { get; init; }
+    public DateTime UpdatedAtUtc { get; init; }
+    public decimal TotalPurchasedAmount { get; init; }
+    public int PurchaseCount { get; init; }
+}
+
+public sealed class SupplierUpsertRequest
+{
+    public string? Name { get; init; }
+    public string? ContactName { get; init; }
+    public string? OrganizationName { get; init; }
+    public string? BranchName { get; init; }
+    public string? Email { get; init; }
+    public string? Phone { get; init; }
+    public string? Address { get; init; }
+    public string? TaxId { get; init; }
+    public string? SourceChannel { get; init; }
+    public string? ShippingAddress { get; init; }
+    public string? ShippingEmail { get; init; }
+    public string? ShippingPhone { get; init; }
+    public string? Notes { get; init; }
+}
+
+public sealed class SupplierPurchaseHistoryResponse
+{
+    public long Id { get; init; }
+    public Guid SupplierId { get; init; }
+    public DateTime? PurchaseDate { get; init; }
+    public string? ReferenceNo { get; init; }
+    public string? Description { get; init; }
+    public string CurrencyCode { get; init; } = "THB";
+    public decimal? SubtotalAmount { get; init; }
+    public decimal? TaxAmount { get; init; }
+    public decimal? TotalAmount { get; init; }
+    public string Status { get; init; } = "recorded";
+    public string? Notes { get; init; }
+    public IReadOnlyList<string> AttachmentUrls { get; init; } = [];
+    public DateTime CreatedAtUtc { get; init; }
+    public DateTime UpdatedAtUtc { get; init; }
+}
+
+public sealed class SupplierPurchaseUpsertRequest
+{
+    public DateTime? PurchaseDate { get; init; }
+    public string? ReferenceNo { get; init; }
+    public string? Description { get; init; }
+    public string? CurrencyCode { get; init; }
+    public decimal? SubtotalAmount { get; init; }
+    public decimal? TaxAmount { get; init; }
+    public decimal? TotalAmount { get; init; }
+    public string? Status { get; init; }
+    public string? Notes { get; init; }
+    public IReadOnlyList<string>? AttachmentUrls { get; init; }
 }
 
 public sealed class PlatformActivityLogResponse
@@ -196,6 +278,7 @@ public sealed class ManufacturingProjectSummaryResponse
     public decimal TotalCost { get; init; }
     public decimal SellingPrice { get; init; }
     public decimal MaximumDiscountedPrice { get; init; }
+    public decimal? Budget { get; init; }
     public DateTime? CompletionDate { get; init; }
     public bool CustomOrder { get; init; }
     public string? Material { get; init; }
@@ -226,6 +309,7 @@ public sealed class ManufacturingProjectDetailResponse
     public decimal TotalCost { get; init; }
     public decimal SellingPrice { get; init; }
     public decimal MaximumDiscountedPrice { get; init; }
+    public decimal? Budget { get; init; }
     public DateTime? CompletionDate { get; init; }
     public bool CustomOrder { get; init; }
     public string? Material { get; init; }
@@ -269,6 +353,7 @@ public sealed class ManufacturingProjectUpsertRequest
     public decimal? TotalCost { get; init; }
     public decimal? SellingPrice { get; init; }
     public decimal? MaximumDiscountedPrice { get; init; }
+    public decimal? Budget { get; init; }
     public DateTime? CompletionDate { get; init; }
     public bool? CustomOrder { get; init; }
     public string? Material { get; init; }

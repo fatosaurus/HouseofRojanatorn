@@ -183,6 +183,7 @@ export interface Customer {
   address: string | null
   notes: string | null
   photoUrl: string | null
+  photos: string[]
   customerSince: string | null
   createdAtUtc: string
   updatedAtUtc: string
@@ -199,6 +200,81 @@ export interface CustomerActivity {
   activityAtUtc: string
   craftsmanName: string | null
   notes: string | null
+}
+
+export interface CustomerPurchasedPhoto {
+  projectId: number
+  manufacturingCode: string
+  pieceName: string
+  soldAt: string | null
+  photoUrl: string
+}
+
+export interface Supplier {
+  id: string
+  name: string
+  contactName: string | null
+  organizationName: string | null
+  branchName: string | null
+  email: string | null
+  phone: string | null
+  address: string | null
+  taxId: string | null
+  sourceChannel: string | null
+  shippingAddress: string | null
+  shippingEmail: string | null
+  shippingPhone: string | null
+  notes: string | null
+  createdAtUtc: string
+  updatedAtUtc: string
+  totalPurchasedAmount: number
+  purchaseCount: number
+}
+
+export interface SupplierUpsertRequest {
+  name?: string | null
+  contactName?: string | null
+  organizationName?: string | null
+  branchName?: string | null
+  email?: string | null
+  phone?: string | null
+  address?: string | null
+  taxId?: string | null
+  sourceChannel?: string | null
+  shippingAddress?: string | null
+  shippingEmail?: string | null
+  shippingPhone?: string | null
+  notes?: string | null
+}
+
+export interface SupplierPurchaseHistory {
+  id: number
+  supplierId: string
+  purchaseDate: string | null
+  referenceNo: string | null
+  description: string | null
+  currencyCode: string
+  subtotalAmount: number | null
+  taxAmount: number | null
+  totalAmount: number | null
+  status: string
+  notes: string | null
+  attachmentUrls: string[]
+  createdAtUtc: string
+  updatedAtUtc: string
+}
+
+export interface SupplierPurchaseUpsertRequest {
+  purchaseDate?: string | null
+  referenceNo?: string | null
+  description?: string | null
+  currencyCode?: string | null
+  subtotalAmount?: number | null
+  taxAmount?: number | null
+  totalAmount?: number | null
+  status?: string | null
+  notes?: string | null
+  attachmentUrls?: string[] | null
 }
 
 export interface PlatformActivityLog {
@@ -220,6 +296,7 @@ export interface CustomerUpsertRequest {
   address?: string | null
   notes?: string | null
   photoUrl?: string | null
+  photos?: string[] | null
   customerSince?: string | null
 }
 
@@ -261,6 +338,7 @@ export interface ManufacturingProjectSummary {
   totalCost: number
   sellingPrice: number
   maximumDiscountedPrice: number
+  budget: number | null
   completionDate: string | null
   customOrder: boolean
   material: string | null
@@ -290,6 +368,7 @@ export interface ManufacturingProjectDetail {
   totalCost: number
   sellingPrice: number
   maximumDiscountedPrice: number
+  budget: number | null
   completionDate: string | null
   customOrder: boolean
   material: string | null
@@ -331,6 +410,7 @@ export interface ManufacturingProjectUpsertRequest {
   totalCost?: number | null
   sellingPrice?: number | null
   maximumDiscountedPrice?: number | null
+  budget?: number | null
   completionDate?: string | null
   customOrder?: boolean | null
   material?: string | null

@@ -6,6 +6,7 @@ import type {
   AuthResponse,
   Customer,
   CustomerActivity,
+  CustomerPurchasedPhoto,
   CustomerUpsertRequest,
   InviteDetails,
   InviteResponse,
@@ -32,6 +33,10 @@ import type {
   ManufacturingSettingsUpdateRequest,
   PlatformActivityLog,
   PagedResponse,
+  Supplier,
+  SupplierPurchaseHistory,
+  SupplierPurchaseUpsertRequest,
+  SupplierUpsertRequest,
   UserListResponse,
   UserSummary,
   UsageBatch,
@@ -327,6 +332,7 @@ function mapCustomer(record: UnknownRecord): Customer {
     address: readString(record, 'address', 'Address'),
     notes: readString(record, 'notes', 'Notes'),
     photoUrl: readString(record, 'photoUrl', 'PhotoUrl'),
+    photos: readStringArray(record, 'photos', 'Photos'),
     customerSince: readString(record, 'customerSince', 'CustomerSince'),
     createdAtUtc: readString(record, 'createdAtUtc', 'CreatedAtUtc') ?? '',
     updatedAtUtc: readString(record, 'updatedAtUtc', 'UpdatedAtUtc') ?? '',
@@ -345,6 +351,58 @@ function mapCustomerActivity(record: UnknownRecord): CustomerActivity {
     activityAtUtc: readString(record, 'activityAtUtc', 'ActivityAtUtc') ?? '',
     craftsmanName: readString(record, 'craftsmanName', 'CraftsmanName'),
     notes: readString(record, 'notes', 'Notes')
+  }
+}
+
+function mapCustomerPurchasedPhoto(record: UnknownRecord): CustomerPurchasedPhoto {
+  return {
+    projectId: readNumber(record, 'projectId', 'ProjectId') ?? 0,
+    manufacturingCode: readString(record, 'manufacturingCode', 'ManufacturingCode') ?? '',
+    pieceName: readString(record, 'pieceName', 'PieceName') ?? '',
+    soldAt: readString(record, 'soldAt', 'SoldAt'),
+    photoUrl: readString(record, 'photoUrl', 'PhotoUrl') ?? ''
+  }
+}
+
+function mapSupplier(record: UnknownRecord): Supplier {
+  return {
+    id: readString(record, 'id', 'Id') ?? '',
+    name: readString(record, 'name', 'Name') ?? '',
+    contactName: readString(record, 'contactName', 'ContactName'),
+    organizationName: readString(record, 'organizationName', 'OrganizationName'),
+    branchName: readString(record, 'branchName', 'BranchName'),
+    email: readString(record, 'email', 'Email'),
+    phone: readString(record, 'phone', 'Phone'),
+    address: readString(record, 'address', 'Address'),
+    taxId: readString(record, 'taxId', 'TaxId'),
+    sourceChannel: readString(record, 'sourceChannel', 'SourceChannel'),
+    shippingAddress: readString(record, 'shippingAddress', 'ShippingAddress'),
+    shippingEmail: readString(record, 'shippingEmail', 'ShippingEmail'),
+    shippingPhone: readString(record, 'shippingPhone', 'ShippingPhone'),
+    notes: readString(record, 'notes', 'Notes'),
+    createdAtUtc: readString(record, 'createdAtUtc', 'CreatedAtUtc') ?? '',
+    updatedAtUtc: readString(record, 'updatedAtUtc', 'UpdatedAtUtc') ?? '',
+    totalPurchasedAmount: readNumber(record, 'totalPurchasedAmount', 'TotalPurchasedAmount') ?? 0,
+    purchaseCount: readNumber(record, 'purchaseCount', 'PurchaseCount') ?? 0
+  }
+}
+
+function mapSupplierPurchaseHistory(record: UnknownRecord): SupplierPurchaseHistory {
+  return {
+    id: readNumber(record, 'id', 'Id') ?? 0,
+    supplierId: readString(record, 'supplierId', 'SupplierId') ?? '',
+    purchaseDate: readString(record, 'purchaseDate', 'PurchaseDate'),
+    referenceNo: readString(record, 'referenceNo', 'ReferenceNo'),
+    description: readString(record, 'description', 'Description'),
+    currencyCode: readString(record, 'currencyCode', 'CurrencyCode') ?? 'THB',
+    subtotalAmount: readNumber(record, 'subtotalAmount', 'SubtotalAmount'),
+    taxAmount: readNumber(record, 'taxAmount', 'TaxAmount'),
+    totalAmount: readNumber(record, 'totalAmount', 'TotalAmount'),
+    status: readString(record, 'status', 'Status') ?? 'recorded',
+    notes: readString(record, 'notes', 'Notes'),
+    attachmentUrls: readStringArray(record, 'attachmentUrls', 'AttachmentUrls'),
+    createdAtUtc: readString(record, 'createdAtUtc', 'CreatedAtUtc') ?? '',
+    updatedAtUtc: readString(record, 'updatedAtUtc', 'UpdatedAtUtc') ?? ''
   }
 }
 
@@ -416,6 +474,7 @@ function mapManufacturingSummary(record: UnknownRecord): ManufacturingProjectSum
     totalCost: readNumber(record, 'totalCost', 'TotalCost') ?? 0,
     sellingPrice: readNumber(record, 'sellingPrice', 'SellingPrice') ?? 0,
     maximumDiscountedPrice: readNumber(record, 'maximumDiscountedPrice', 'MaximumDiscountedPrice') ?? 0,
+    budget: readNumber(record, 'budget', 'Budget'),
     completionDate: readString(record, 'completionDate', 'CompletionDate'),
     customOrder: Boolean(pick<unknown>(record, 'customOrder', 'CustomOrder')),
     material: readString(record, 'material', 'Material'),
@@ -450,6 +509,7 @@ function mapManufacturingDetail(record: UnknownRecord): ManufacturingProjectDeta
     totalCost: readNumber(record, 'totalCost', 'TotalCost') ?? 0,
     sellingPrice: readNumber(record, 'sellingPrice', 'SellingPrice') ?? 0,
     maximumDiscountedPrice: readNumber(record, 'maximumDiscountedPrice', 'MaximumDiscountedPrice') ?? 0,
+    budget: readNumber(record, 'budget', 'Budget'),
     completionDate: readString(record, 'completionDate', 'CompletionDate'),
     customOrder: Boolean(pick<unknown>(record, 'customOrder', 'CustomOrder')),
     material: readString(record, 'material', 'Material'),
@@ -802,6 +862,72 @@ export async function getCustomerActivity(id: string, limit = 100): Promise<Cust
   return response
     .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
     .map(mapCustomerActivity)
+}
+
+export async function getCustomerPurchasedPhotos(id: string, limit = 180): Promise<CustomerPurchasedPhoto[]> {
+  const response = await fetchJson<unknown[]>(`${env.apiBaseUrl}/customers/${encodeURIComponent(id)}/purchased-photos?limit=${limit}`)
+  return response
+    .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+    .map(mapCustomerPurchasedPhoto)
+    .filter(item => item.photoUrl.trim().length > 0)
+}
+
+export interface SuppliersQuery {
+  search?: string
+  limit?: number
+  offset?: number
+}
+
+export async function getSuppliers(query: SuppliersQuery): Promise<PagedResponse<Supplier>> {
+  const params = new URLSearchParams()
+  if (query.search?.trim()) params.set('search', query.search.trim())
+  if (typeof query.limit === 'number') params.set('limit', String(query.limit))
+  if (typeof query.offset === 'number') params.set('offset', String(query.offset))
+  const suffix = params.toString() ? `?${params}` : ''
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/suppliers${suffix}`)
+  return mapPagedResponse(response, mapSupplier)
+}
+
+export async function getSupplier(id: string): Promise<Supplier> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/suppliers/${encodeURIComponent(id)}`)
+  return mapSupplier(response)
+}
+
+export async function createSupplier(payload: SupplierUpsertRequest): Promise<Supplier> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/suppliers`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+  return mapSupplier(response)
+}
+
+export async function updateSupplier(id: string, payload: SupplierUpsertRequest): Promise<Supplier> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/suppliers/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  })
+  return mapSupplier(response)
+}
+
+export async function deleteSupplier(id: string): Promise<void> {
+  await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/suppliers/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  })
+}
+
+export async function getSupplierPurchases(id: string, limit = 100): Promise<SupplierPurchaseHistory[]> {
+  const response = await fetchJson<unknown[]>(`${env.apiBaseUrl}/suppliers/${encodeURIComponent(id)}/purchases?limit=${limit}`)
+  return response
+    .filter((value): value is UnknownRecord => typeof value === 'object' && value != null)
+    .map(mapSupplierPurchaseHistory)
+}
+
+export async function createSupplierPurchase(id: string, payload: SupplierPurchaseUpsertRequest): Promise<SupplierPurchaseHistory> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/suppliers/${encodeURIComponent(id)}/purchases`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+  return mapSupplierPurchaseHistory(response)
 }
 
 interface PlatformActivityQuery {

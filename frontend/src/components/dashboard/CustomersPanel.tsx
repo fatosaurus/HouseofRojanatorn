@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Expand, Plus, X } from 'lucide-react'
+import { ArrowLeft, Expand, Pencil, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { addCustomerNote, createCustomer, getCustomer, getCustomerActivity, getCustomers } from '../../api/client'
-import type { Customer, CustomerActivity } from '../../api/types'
+import { addCustomerNote, createCustomer, getCustomer, getCustomerActivity, getCustomerPurchasedPhotos, getCustomers, updateCustomer } from '../../api/client'
+import type { Customer, CustomerActivity, CustomerPurchasedPhoto } from '../../api/types'
+import { ImageDropzone } from '../common/ImageDropzone'
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('th-TH', {
@@ -34,13 +35,95 @@ function getInitial(value: string): string {
   return normalized ? normalized.charAt(0).toUpperCase() : '?'
 }
 
+function customerAvatarUrl(customer: Customer): string | null {
+  if (customer.photoUrl?.trim()) {
+    return customer.photoUrl
+  }
+
+  if (customer.photos.length > 0) {
+    return customer.photos[0]
+  }
+
+  return null
+}
+
+function formatActivityDateTime(raw: string | null | undefined): string {
+  if (!raw) {
+    return '-'
+  }
+
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) {
+    return raw
+  }
+
+  return parsed.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+interface CustomerNoteEntry {
+  id: string
+  body: string
+  createdAtUtc: string | null
+}
+
+function parseCustomerNotes(rawNotes: string | null | undefined): CustomerNoteEntry[] {
+  if (!rawNotes?.trim()) {
+    return []
+  }
+
+  const blocks = rawNotes
+    .split(/\n\s*\n/g)
+    .map(block => block.trim())
+    .filter(Boolean)
+
+  const entries = blocks.map((block, index) => {
+    const match = block.match(/^\[(?<timestamp>[^\]]+)\]\s*(?<text>[\s\S]*)$/)
+    const timestamp = match?.groups?.timestamp?.trim() ?? null
+    const body = match?.groups?.text?.trim() ?? block
+    const parsedTimestamp = timestamp ? new Date(timestamp) : null
+    const createdAtUtc = parsedTimestamp && !Number.isNaN(parsedTimestamp.getTime())
+      ? parsedTimestamp.toISOString()
+      : null
+
+    return {
+      id: `${createdAtUtc ?? 'note'}-${index}`,
+      body,
+      createdAtUtc
+    } satisfies CustomerNoteEntry
+  })
+
+  return entries.reverse()
+}
+
+function shouldShowNoteTimestamp(createdAtUtc: string | null): boolean {
+  if (!createdAtUtc) {
+    return false
+  }
+
+  const parsed = new Date(createdAtUtc)
+  if (Number.isNaN(parsed.getTime())) {
+    return false
+  }
+
+  const elapsedMs = Date.now() - parsed.getTime()
+  return elapsedMs >= 24 * 60 * 60 * 1000
+}
+
 interface CustomerDraft {
   name: string
   nickname: string
   email: string
   phone: string
   address: string
+  customerSince: string
   notes: string
+  photoUrl: string
 }
 
 const EMPTY_CUSTOMER_DRAFT: CustomerDraft = {
@@ -49,7 +132,9 @@ const EMPTY_CUSTOMER_DRAFT: CustomerDraft = {
   email: '',
   phone: '',
   address: '',
-  notes: ''
+  customerSince: '',
+  notes: '',
+  photoUrl: ''
 }
 
 const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -89,23 +174,135 @@ function parseCustomersRoute(pathname: string): { detailId: string | null, isFul
 interface CustomerDetailProps {
   customer: Customer
   activity: CustomerActivity[]
+  purchasedPhotos: CustomerPurchasedPhoto[]
+  isLoadingPurchasedPhotos: boolean
   noteDraft: string
   isSaving: boolean
+  isEditing: boolean
+  isAddingNote: boolean
+  isShowingAllNotes: boolean
+  editDraft: CustomerDraft
   onNoteChange: (value: string) => void
   onAddNote: () => void
+  onStartAddNote: () => void
+  onCancelAddNote: () => void
+  onToggleShowAllNotes: () => void
+  onProfilePhotoChange: (photoUrl: string | null) => void
+  onPhotosChange: (photos: string[]) => void
+  onEditDraftChange: (patch: Partial<CustomerDraft>) => void
+  onToggleEdit: () => void
+  onCancelEdit: () => void
+  onSaveEdit: () => void
 }
 
-function CustomerDetailContent({ customer, activity, noteDraft, isSaving, onNoteChange, onAddNote }: CustomerDetailProps) {
+function CustomerDetailContent({
+  customer,
+  activity,
+  purchasedPhotos,
+  isLoadingPurchasedPhotos,
+  noteDraft,
+  isSaving,
+  isEditing,
+  isAddingNote,
+  isShowingAllNotes,
+  editDraft,
+  onNoteChange,
+  onAddNote,
+  onStartAddNote,
+  onCancelAddNote,
+  onToggleShowAllNotes,
+  onProfilePhotoChange,
+  onPhotosChange,
+  onEditDraftChange,
+  onToggleEdit,
+  onCancelEdit,
+  onSaveEdit
+}: CustomerDetailProps) {
+  const avatarUrl = customerAvatarUrl(customer)
+  const parsedNotes = useMemo(() => parseCustomerNotes(customer.notes), [customer.notes])
+  const visibleNotes = isShowingAllNotes ? parsedNotes : parsedNotes.slice(0, 3)
+
   return (
     <>
       <section className="customer-detail-hero">
-        <span className="customer-avatar customer-avatar-large">{getInitial(customer.name)}</span>
+        {avatarUrl ? (
+          <span className="customer-avatar customer-avatar-large customer-avatar-photo">
+            <img src={avatarUrl} alt={customer.name} />
+          </span>
+        ) : (
+          <span className="customer-avatar customer-avatar-large">{getInitial(customer.name)}</span>
+        )}
         <h4>{customer.name}</h4>
         <p>
           Customer since
           {' '}
           {formatDate(customer.customerSince)}
         </p>
+      </section>
+
+      <section className="customer-detail-section customer-edit-section">
+        <div className="customer-edit-head">
+          <h4>Edit Profile</h4>
+          {!isEditing ? (
+            <button type="button" className="secondary-btn" onClick={onToggleEdit}>
+              <Pencil size={14} />
+              Edit
+            </button>
+          ) : null}
+        </div>
+
+        {isEditing ? (
+          <div className="customer-edit-form">
+            <label>
+              Name
+              <input value={editDraft.name} onChange={event => onEditDraftChange({ name: event.target.value })} />
+            </label>
+            <label>
+              Nickname
+              <input value={editDraft.nickname} onChange={event => onEditDraftChange({ nickname: event.target.value })} />
+            </label>
+            <label>
+              Email
+              <input value={editDraft.email} onChange={event => onEditDraftChange({ email: event.target.value })} />
+            </label>
+            <label>
+              Phone
+              <input value={editDraft.phone} onChange={event => onEditDraftChange({ phone: event.target.value })} />
+            </label>
+            <label>
+              Customer Since
+              <input type="date" value={editDraft.customerSince} onChange={event => onEditDraftChange({ customerSince: event.target.value })} />
+            </label>
+            <label className="customer-edit-full">
+              Address
+              <input value={editDraft.address} onChange={event => onEditDraftChange({ address: event.target.value })} />
+            </label>
+            <label className="customer-edit-full">
+              Notes
+              <textarea rows={3} value={editDraft.notes} onChange={event => onEditDraftChange({ notes: event.target.value })} />
+            </label>
+            <label className="customer-edit-full">
+              Profile Picture
+              <ImageDropzone
+                title="Customer Profile Picture"
+                images={editDraft.photoUrl ? [editDraft.photoUrl] : []}
+                onChange={images => onEditDraftChange({ photoUrl: images[0] ?? '' })}
+                maxFiles={1}
+                helperText="Shown as customer avatar across tables and details."
+              />
+            </label>
+            <div className="crm-form-actions customer-edit-full">
+              <button type="button" className="secondary-btn" onClick={onCancelEdit} disabled={isSaving}>
+                Cancel
+              </button>
+              <button type="button" className="primary-btn" onClick={onSaveEdit} disabled={isSaving}>
+                {isSaving ? 'Saving...' : 'Save Profile'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="panel-placeholder">Use Edit to update customer profile information.</p>
+        )}
       </section>
 
       <section className="customer-detail-section">
@@ -144,21 +341,103 @@ function CustomerDetailContent({ customer, activity, noteDraft, isSaving, onNote
         </div>
       </section>
 
-      {customer.notes ? (
-        <section className="customer-detail-section">
+      <section className="customer-detail-section">
+        <div className="customer-notes-head">
           <h4>Notes</h4>
-          <p className="panel-placeholder">{customer.notes}</p>
-        </section>
-      ) : null}
-
-      <section className="crm-note-editor customer-note-editor">
-        <h4>Append Note</h4>
-        <textarea rows={3} value={noteDraft} onChange={event => onNoteChange(event.target.value)} placeholder="Add relationship or order notes..." />
-        <div className="crm-form-actions">
-          <button type="button" className="primary-btn" onClick={onAddNote} disabled={isSaving || !noteDraft.trim()}>
-            {isSaving ? 'Saving...' : 'Append Note'}
-          </button>
+          {!isAddingNote ? (
+            <button type="button" className="secondary-btn" onClick={onStartAddNote}>
+              <Plus size={14} />
+              Add Note
+            </button>
+          ) : null}
         </div>
+
+        {isAddingNote ? (
+          <div className="crm-note-editor customer-note-editor">
+            <textarea rows={3} value={noteDraft} onChange={event => onNoteChange(event.target.value)} placeholder="Add relationship or order notes..." />
+            <div className="crm-form-actions">
+              <button type="button" className="secondary-btn" onClick={onCancelAddNote} disabled={isSaving}>
+                Cancel
+              </button>
+              <button type="button" className="primary-btn" onClick={onAddNote} disabled={isSaving || !noteDraft.trim()}>
+                {isSaving ? 'Saving...' : 'Save Note'}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {parsedNotes.length === 0 ? (
+          <p className="panel-placeholder">No notes yet.</p>
+        ) : (
+          <>
+            <div className="customer-note-bubbles">
+              {visibleNotes.map(note => (
+                <article key={note.id} className="customer-note-bubble">
+                  <p>{note.body}</p>
+                  {shouldShowNoteTimestamp(note.createdAtUtc) ? (
+                    <small>{formatActivityDateTime(note.createdAtUtc)}</small>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+            {parsedNotes.length > 3 ? (
+              <button type="button" className="secondary-btn customer-notes-toggle" onClick={onToggleShowAllNotes}>
+                {isShowingAllNotes ? 'Show Less' : `See More (${parsedNotes.length - 3})`}
+              </button>
+            ) : null}
+          </>
+        )}
+      </section>
+
+      <section className="customer-detail-section">
+        <h4>Customer Gallery</h4>
+        <div className="customer-gallery-stack">
+          <div className="customer-gallery-subsection">
+            <div className="customer-gallery-head">
+              <h5>Profile Uploads ({customer.photos.length})</h5>
+            </div>
+            <ImageDropzone
+              title="Upload Customer Images"
+              images={customer.photos}
+              onChange={onPhotosChange}
+            />
+          </div>
+
+          <div className="customer-gallery-subsection">
+            <div className="customer-gallery-head">
+              <h5>Purchased Product Photos ({purchasedPhotos.length})</h5>
+            </div>
+            {isLoadingPurchasedPhotos ? (
+              <p className="panel-placeholder">Loading purchased product gallery...</p>
+            ) : purchasedPhotos.length === 0 ? (
+              <p className="panel-placeholder">No purchased product photos yet.</p>
+            ) : (
+              <div className="image-grid customer-product-gallery-grid">
+                {purchasedPhotos.map((photo, index) => (
+                  <article key={`${photo.projectId}-${index}`} className="image-card customer-product-gallery-card">
+                    <img src={photo.photoUrl} alt={`${photo.pieceName} ${index + 1}`} />
+                    <div className="customer-product-gallery-meta">
+                      <strong>{photo.pieceName}</strong>
+                      <p>{photo.manufacturingCode}</p>
+                      <small>{formatDate(photo.soldAt)}</small>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="customer-detail-section">
+        <h4>Profile Picture</h4>
+        <ImageDropzone
+          title="Upload Profile Picture"
+          images={customer.photoUrl ? [customer.photoUrl] : []}
+          onChange={images => onProfilePhotoChange(images[0] ?? null)}
+          maxFiles={1}
+          helperText="This image is used as the customer avatar."
+        />
       </section>
 
       <section className="usage-lines customer-detail-section">
@@ -199,7 +478,13 @@ export function CustomersPanel() {
 
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [selectedActivity, setSelectedActivity] = useState<CustomerActivity[]>([])
+  const [selectedPurchasedPhotos, setSelectedPurchasedPhotos] = useState<CustomerPurchasedPhoto[]>([])
+  const [isLoadingPurchasedPhotos, setIsLoadingPurchasedPhotos] = useState(false)
   const [noteDraft, setNoteDraft] = useState('')
+  const [isAddingNote, setIsAddingNote] = useState(false)
+  const [isShowingAllNotes, setIsShowingAllNotes] = useState(false)
+  const [isEditingDetail, setIsEditingDetail] = useState(false)
+  const [editDraft, setEditDraft] = useState<CustomerDraft>(EMPTY_CUSTOMER_DRAFT)
 
   const [isCreating, setIsCreating] = useState(false)
   const [draft, setDraft] = useState<CustomerDraft>(EMPTY_CUSTOMER_DRAFT)
@@ -239,23 +524,45 @@ export function CustomersPanel() {
     if (!route.detailId) {
       setSelectedCustomer(null)
       setSelectedActivity([])
+      setSelectedPurchasedPhotos([])
+      setIsLoadingPurchasedPhotos(false)
       setIsLoadingDetail(false)
       setNoteDraft('')
+      setIsAddingNote(false)
+      setIsShowingAllNotes(false)
+      setIsEditingDetail(false)
+      setEditDraft(EMPTY_CUSTOMER_DRAFT)
       return
     }
 
     let cancelled = false
     setIsLoadingDetail(true)
+    setIsLoadingPurchasedPhotos(true)
     setError(null)
 
     void Promise.all([
       getCustomer(route.detailId),
-      getCustomerActivity(route.detailId, 100)
+      getCustomerActivity(route.detailId, 100),
+      getCustomerPurchasedPhotos(route.detailId, 220)
     ])
-      .then(([customer, activity]) => {
+      .then(([customer, activity, purchasedPhotos]) => {
         if (!cancelled) {
           setSelectedCustomer(customer)
           setSelectedActivity(activity)
+          setSelectedPurchasedPhotos(purchasedPhotos)
+          setIsAddingNote(false)
+          setIsShowingAllNotes(false)
+          setIsEditingDetail(false)
+          setEditDraft({
+            name: customer.name,
+            nickname: customer.nickname ?? '',
+            email: customer.email ?? '',
+            phone: customer.phone ?? '',
+            address: customer.address ?? '',
+            customerSince: customer.customerSince ? customer.customerSince.slice(0, 10) : '',
+            notes: customer.notes ?? '',
+            photoUrl: customer.photoUrl ?? ''
+          })
         }
       })
       .catch(() => {
@@ -263,11 +570,17 @@ export function CustomersPanel() {
           setError('Unable to load selected customer profile.')
           setSelectedCustomer(null)
           setSelectedActivity([])
+          setSelectedPurchasedPhotos([])
+          setIsAddingNote(false)
+          setIsShowingAllNotes(false)
+          setIsEditingDetail(false)
+          setEditDraft(EMPTY_CUSTOMER_DRAFT)
         }
       })
       .finally(() => {
         if (!cancelled) {
           setIsLoadingDetail(false)
+          setIsLoadingPurchasedPhotos(false)
         }
       })
 
@@ -334,6 +647,8 @@ export function CustomersPanel() {
 
       setSelectedActivity(activity)
       setNoteDraft('')
+      setIsAddingNote(false)
+      setIsShowingAllNotes(false)
     } catch {
       setError('Unable to append customer note.')
     } finally {
@@ -341,7 +656,112 @@ export function CustomersPanel() {
     }
   }
 
+  async function handleCustomerPhotosChange(photos: string[]) {
+    if (!selectedCustomer) {
+      return
+    }
+
+    setIsSaving(true)
+    setError(null)
+    try {
+      const updated = await updateCustomer(selectedCustomer.id, {
+        name: selectedCustomer.name,
+        nickname: selectedCustomer.nickname,
+        email: selectedCustomer.email,
+        phone: selectedCustomer.phone,
+        address: selectedCustomer.address,
+        notes: selectedCustomer.notes,
+        photoUrl: selectedCustomer.photoUrl,
+        customerSince: selectedCustomer.customerSince,
+        photos
+      })
+      setSelectedCustomer(updated)
+    } catch {
+      setError('Unable to update customer gallery.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  function resetEditDraftFromCustomer(customer: Customer) {
+    setEditDraft({
+      name: customer.name,
+      nickname: customer.nickname ?? '',
+      email: customer.email ?? '',
+      phone: customer.phone ?? '',
+      address: customer.address ?? '',
+      customerSince: customer.customerSince ? customer.customerSince.slice(0, 10) : '',
+      notes: customer.notes ?? '',
+      photoUrl: customer.photoUrl ?? ''
+    })
+  }
+
+  async function handleCustomerProfilePhotoChange(photoUrl: string | null) {
+    if (!selectedCustomer) {
+      return
+    }
+
+    setIsSaving(true)
+    setError(null)
+    try {
+      const updated = await updateCustomer(selectedCustomer.id, {
+        name: selectedCustomer.name,
+        nickname: selectedCustomer.nickname,
+        email: selectedCustomer.email,
+        phone: selectedCustomer.phone,
+        address: selectedCustomer.address,
+        notes: selectedCustomer.notes,
+        customerSince: selectedCustomer.customerSince,
+        photoUrl,
+        photos: selectedCustomer.photos
+      })
+      setSelectedCustomer(updated)
+      resetEditDraftFromCustomer(updated)
+    } catch {
+      setError('Unable to update customer profile picture.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function handleSaveCustomerProfile() {
+    if (!selectedCustomer) {
+      return
+    }
+
+    if (!editDraft.name.trim()) {
+      setError('Customer name is required.')
+      return
+    }
+
+    setIsSaving(true)
+    setError(null)
+
+    try {
+      const updated = await updateCustomer(selectedCustomer.id, {
+        name: editDraft.name.trim(),
+        nickname: editDraft.nickname.trim() || null,
+        email: editDraft.email.trim() || null,
+        phone: editDraft.phone.trim() || null,
+        address: editDraft.address.trim() || null,
+        notes: editDraft.notes.trim() || null,
+        customerSince: editDraft.customerSince || null,
+        photoUrl: editDraft.photoUrl.trim() || null,
+        photos: selectedCustomer.photos
+      })
+      setSelectedCustomer(updated)
+      resetEditDraftFromCustomer(updated)
+      setIsEditingDetail(false)
+      await loadCustomers(search)
+    } catch {
+      setError('Unable to save customer profile.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   function closeDetail() {
+    setIsEditingDetail(false)
     navigate('/dashboard/customers')
   }
 
@@ -445,7 +865,13 @@ export function CustomersPanel() {
                 >
                   <td>
                     <div className="customer-name-cell">
-                      <span className="customer-avatar">{getInitial(customer.name)}</span>
+                      {customerAvatarUrl(customer) ? (
+                        <span className="customer-avatar customer-avatar-photo">
+                          <img src={customerAvatarUrl(customer) ?? ''} alt={customer.name} />
+                        </span>
+                      ) : (
+                        <span className="customer-avatar">{getInitial(customer.name)}</span>
+                      )}
                       <div>
                         <strong>{customer.name}</strong>
                         {customer.nickname ? <p className="inline-subtext">{customer.nickname}</p> : null}
@@ -475,7 +901,16 @@ export function CustomersPanel() {
             <h3>Customer Details</h3>
             <p>Full page profile view with notes and activity.</p>
           </div>
-          <div className="detail-actions-row">
+          <div className="detail-actions-row detail-actions-row-compact">
+            <button
+              type="button"
+              className="icon-btn icon-btn-sm"
+              onClick={() => setIsEditingDetail(true)}
+              aria-label="Edit customer profile"
+              title="Edit customer profile"
+            >
+              <Pencil size={16} />
+            </button>
             <button type="button" className="icon-btn" onClick={closeFullDetail} aria-label="Back to split view" title="Back to split view">
               <ArrowLeft size={18} />
             </button>
@@ -491,11 +926,40 @@ export function CustomersPanel() {
           <CustomerDetailContent
             customer={selectedCustomer}
             activity={selectedActivity}
+            purchasedPhotos={selectedPurchasedPhotos}
+            isLoadingPurchasedPhotos={isLoadingPurchasedPhotos}
             noteDraft={noteDraft}
             isSaving={isSaving}
+            isEditing={isEditingDetail}
+            isAddingNote={isAddingNote}
+            isShowingAllNotes={isShowingAllNotes}
+            editDraft={editDraft}
             onNoteChange={setNoteDraft}
             onAddNote={() => {
               void handleAddNote()
+            }}
+            onStartAddNote={() => setIsAddingNote(true)}
+            onCancelAddNote={() => {
+              setIsAddingNote(false)
+              setNoteDraft('')
+            }}
+            onToggleShowAllNotes={() => setIsShowingAllNotes(current => !current)}
+            onProfilePhotoChange={photoUrl => {
+              void handleCustomerProfilePhotoChange(photoUrl)
+            }}
+            onPhotosChange={photos => {
+              void handleCustomerPhotosChange(photos)
+            }}
+            onEditDraftChange={patch => setEditDraft(current => ({ ...current, ...patch }))}
+            onToggleEdit={() => setIsEditingDetail(true)}
+            onCancelEdit={() => {
+              if (selectedCustomer) {
+                resetEditDraftFromCustomer(selectedCustomer)
+              }
+              setIsEditingDetail(false)
+            }}
+            onSaveEdit={() => {
+              void handleSaveCustomerProfile()
             }}
           />
         ) : (
@@ -515,7 +979,16 @@ export function CustomersPanel() {
         <aside className="detail-side-panel">
           <div className="drawer-head">
             <h3>Customer Detail</h3>
-            <div className="detail-actions-row">
+            <div className="detail-actions-row detail-actions-row-compact">
+              <button
+                type="button"
+                className="icon-btn icon-btn-sm"
+                onClick={() => setIsEditingDetail(true)}
+                aria-label="Edit customer profile"
+                title="Edit customer profile"
+              >
+                <Pencil size={16} />
+              </button>
               <button type="button" className="icon-btn" onClick={openFullDetail} aria-label="Open full screen" title="Open full screen">
                 <Expand size={18} />
               </button>
@@ -531,11 +1004,40 @@ export function CustomersPanel() {
             <CustomerDetailContent
               customer={selectedCustomer}
               activity={selectedActivity}
+              purchasedPhotos={selectedPurchasedPhotos}
+              isLoadingPurchasedPhotos={isLoadingPurchasedPhotos}
               noteDraft={noteDraft}
               isSaving={isSaving}
+              isEditing={isEditingDetail}
+              isAddingNote={isAddingNote}
+              isShowingAllNotes={isShowingAllNotes}
+              editDraft={editDraft}
               onNoteChange={setNoteDraft}
               onAddNote={() => {
                 void handleAddNote()
+              }}
+              onStartAddNote={() => setIsAddingNote(true)}
+              onCancelAddNote={() => {
+                setIsAddingNote(false)
+                setNoteDraft('')
+              }}
+              onToggleShowAllNotes={() => setIsShowingAllNotes(current => !current)}
+              onProfilePhotoChange={photoUrl => {
+                void handleCustomerProfilePhotoChange(photoUrl)
+              }}
+              onPhotosChange={photos => {
+                void handleCustomerPhotosChange(photos)
+              }}
+              onEditDraftChange={patch => setEditDraft(current => ({ ...current, ...patch }))}
+              onToggleEdit={() => setIsEditingDetail(true)}
+              onCancelEdit={() => {
+                if (selectedCustomer) {
+                  resetEditDraftFromCustomer(selectedCustomer)
+                }
+                setIsEditingDetail(false)
+              }}
+              onSaveEdit={() => {
+                void handleSaveCustomerProfile()
               }}
             />
           ) : (

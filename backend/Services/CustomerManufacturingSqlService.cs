@@ -15,6 +15,17 @@ public interface ICustomerManufacturingSqlService
     Task<bool> DeleteCustomerAsync(Guid customerId, CancellationToken cancellationToken = default);
     Task<bool> AppendCustomerNoteAsync(Guid customerId, string note, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CustomerActivityResponse>> GetCustomerActivityAsync(Guid customerId, int limit, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<CustomerPurchasedPhotoResponse>> GetCustomerPurchasedProductPhotosAsync(
+        Guid customerId,
+        int limit,
+        CancellationToken cancellationToken = default);
+    Task<PagedResponse<SupplierResponse>> GetSuppliersAsync(string? search, int limit, int offset, CancellationToken cancellationToken = default);
+    Task<SupplierResponse?> GetSupplierByIdAsync(Guid supplierId, CancellationToken cancellationToken = default);
+    Task<SupplierResponse> CreateSupplierAsync(SupplierUpsertRequest request, CancellationToken cancellationToken = default);
+    Task<SupplierResponse?> UpdateSupplierAsync(Guid supplierId, SupplierUpsertRequest request, CancellationToken cancellationToken = default);
+    Task<bool> DeleteSupplierAsync(Guid supplierId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SupplierPurchaseHistoryResponse>> GetSupplierPurchaseHistoryAsync(Guid supplierId, int limit, CancellationToken cancellationToken = default);
+    Task<SupplierPurchaseHistoryResponse> CreateSupplierPurchaseHistoryAsync(Guid supplierId, SupplierPurchaseUpsertRequest request, CancellationToken cancellationToken = default);
     Task<PagedResponse<PlatformActivityLogResponse>> GetPlatformActivityAsync(
         string? search,
         string? category,
@@ -92,6 +103,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 c.address,
                 c.notes,
                 c.photo_url,
+                c.photos_json,
                 c.customer_since,
                 c.created_at_utc,
                 c.updated_at_utc,
@@ -150,6 +162,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 c.address,
                 c.notes,
                 c.photo_url,
+                c.photos_json,
                 c.customer_since,
                 c.created_at_utc,
                 c.updated_at_utc,
@@ -195,6 +208,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 address,
                 notes,
                 photo_url,
+                photos_json,
                 customer_since,
                 updated_at_utc
             )
@@ -207,6 +221,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 @Address,
                 @Notes,
                 @PhotoUrl,
+                @PhotosJson,
                 @CustomerSince,
                 SYSUTCDATETIME()
             );
@@ -225,6 +240,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             cmd.Parameters.AddWithValue("@Address", DbNullIfEmpty(request.Address));
             cmd.Parameters.AddWithValue("@Notes", DbNullIfEmpty(request.Notes));
             cmd.Parameters.AddWithValue("@PhotoUrl", DbNullIfEmpty(request.PhotoUrl));
+            cmd.Parameters.AddWithValue("@PhotosJson", SerializeJsonArray(request.Photos));
             cmd.Parameters.AddWithValue("@CustomerSince", DbValue(request.CustomerSince));
             createdId = (Guid)(await cmd.ExecuteScalarAsync(cancellationToken) ?? Guid.Empty);
         }
@@ -264,6 +280,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 address = @Address,
                 notes = @Notes,
                 photo_url = @PhotoUrl,
+                photos_json = @PhotosJson,
                 customer_since = @CustomerSince,
                 updated_at_utc = SYSUTCDATETIME()
             WHERE id = @CustomerId;
@@ -282,6 +299,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             cmd.Parameters.AddWithValue("@Address", request.Address is null ? DbNullIfEmpty(existing.Address) : DbNullIfEmpty(request.Address));
             cmd.Parameters.AddWithValue("@Notes", request.Notes is null ? DbNullIfEmpty(existing.Notes) : DbNullIfEmpty(request.Notes));
             cmd.Parameters.AddWithValue("@PhotoUrl", request.PhotoUrl is null ? DbNullIfEmpty(existing.PhotoUrl) : DbNullIfEmpty(request.PhotoUrl));
+            cmd.Parameters.AddWithValue("@PhotosJson", request.Photos is null ? SerializeJsonArray(existing.Photos) : SerializeJsonArray(request.Photos));
             cmd.Parameters.AddWithValue("@CustomerSince", DbValue(customerSince));
             var rows = await cmd.ExecuteNonQueryAsync(cancellationToken);
             if (rows <= 0)
@@ -379,6 +397,460 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         }
 
         return items;
+    }
+
+    public async Task<IReadOnlyList<CustomerPurchasedPhotoResponse>> GetCustomerPurchasedProductPhotosAsync(
+        Guid customerId,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT TOP (@Limit)
+                mp.id AS project_id,
+                mp.manufacturing_code,
+                mp.piece_name,
+                mp.sold_at,
+                photo.[value] AS photo_url
+            FROM dbo.manufacturing_projects mp
+            CROSS APPLY OPENJSON(
+                CASE
+                    WHEN ISJSON(mp.photos_json) = 1 THEN mp.photos_json
+                    ELSE '[]'
+                END
+            ) photo
+            WHERE mp.customer_id = @CustomerId
+              AND mp.status = 'sold'
+              AND photo.[type] IN (1, 2)
+              AND LTRIM(RTRIM(CONVERT(NVARCHAR(MAX), photo.[value]))) <> ''
+            ORDER BY COALESCE(mp.sold_at, mp.updated_at_utc) DESC, mp.id DESC;
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        var items = new List<CustomerPurchasedPhotoResponse>();
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@CustomerId", customerId);
+        cmd.Parameters.AddWithValue("@Limit", Math.Clamp(limit, 1, 500));
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(new CustomerPurchasedPhotoResponse
+            {
+                ProjectId = GetInt32(reader, "project_id"),
+                ManufacturingCode = GetString(reader, "manufacturing_code"),
+                PieceName = GetString(reader, "piece_name"),
+                SoldAt = GetNullableDateTime(reader, "sold_at"),
+                PhotoUrl = GetString(reader, "photo_url"),
+            });
+        }
+
+        return items;
+    }
+
+    public async Task<PagedResponse<SupplierResponse>> GetSuppliersAsync(
+        string? search,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken = default)
+    {
+        (limit, offset) = NormalizePaging(limit, offset);
+
+        var whereClause = BuildSupplierSearchWhereClause(search);
+        var countSql = $"SELECT COUNT(*) FROM dbo.suppliers s {whereClause};";
+        var listSql = $"""
+            SELECT
+                s.id,
+                s.name,
+                s.contact_name,
+                s.organization_name,
+                s.branch_name,
+                s.email,
+                s.phone,
+                s.address,
+                s.tax_id,
+                s.source_channel,
+                s.shipping_address,
+                s.shipping_email,
+                s.shipping_phone,
+                s.notes,
+                s.created_at_utc,
+                s.updated_at_utc,
+                COALESCE(p.total_purchased_amount, 0) AS total_purchased_amount,
+                COALESCE(p.purchase_count, 0) AS purchase_count
+            FROM dbo.suppliers s
+            OUTER APPLY (
+                SELECT
+                    SUM(COALESCE(ph.total_amount, 0)) AS total_purchased_amount,
+                    COUNT(*) AS purchase_count
+                FROM dbo.supplier_purchase_history ph
+                WHERE ph.supplier_id = s.id
+            ) p
+            {whereClause}
+            ORDER BY s.updated_at_utc DESC, s.name
+            OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        int totalCount;
+        await using (var countCmd = new SqlCommand(countSql, conn))
+        {
+            ApplySupplierSearchParams(countCmd, search);
+            totalCount = Convert.ToInt32(await countCmd.ExecuteScalarAsync(cancellationToken) ?? 0);
+        }
+
+        var items = new List<SupplierResponse>();
+        await using (var listCmd = new SqlCommand(listSql, conn))
+        {
+            ApplySupplierSearchParams(listCmd, search);
+            listCmd.Parameters.AddWithValue("@Offset", offset);
+            listCmd.Parameters.AddWithValue("@Limit", limit);
+
+            await using var reader = await listCmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(MapSupplier(reader));
+            }
+        }
+
+        return new PagedResponse<SupplierResponse>(items, totalCount, limit, offset);
+    }
+
+    public async Task<SupplierResponse?> GetSupplierByIdAsync(Guid supplierId, CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT
+                s.id,
+                s.name,
+                s.contact_name,
+                s.organization_name,
+                s.branch_name,
+                s.email,
+                s.phone,
+                s.address,
+                s.tax_id,
+                s.source_channel,
+                s.shipping_address,
+                s.shipping_email,
+                s.shipping_phone,
+                s.notes,
+                s.created_at_utc,
+                s.updated_at_utc,
+                COALESCE(p.total_purchased_amount, 0) AS total_purchased_amount,
+                COALESCE(p.purchase_count, 0) AS purchase_count
+            FROM dbo.suppliers s
+            OUTER APPLY (
+                SELECT
+                    SUM(COALESCE(ph.total_amount, 0)) AS total_purchased_amount,
+                    COUNT(*) AS purchase_count
+                FROM dbo.supplier_purchase_history ph
+                WHERE ph.supplier_id = s.id
+            ) p
+            WHERE s.id = @SupplierId;
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@SupplierId", supplierId);
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return MapSupplier(reader);
+    }
+
+    public async Task<SupplierResponse> CreateSupplierAsync(SupplierUpsertRequest request, CancellationToken cancellationToken = default)
+    {
+        var normalizedName = NormalizeRequired(request.Name, "Supplier name is required.");
+
+        const string sql = """
+            INSERT INTO dbo.suppliers (
+                name,
+                contact_name,
+                organization_name,
+                branch_name,
+                email,
+                phone,
+                address,
+                tax_id,
+                source_channel,
+                shipping_address,
+                shipping_email,
+                shipping_phone,
+                notes,
+                updated_at_utc
+            )
+            OUTPUT INSERTED.id
+            VALUES (
+                @Name,
+                @ContactName,
+                @OrganizationName,
+                @BranchName,
+                @Email,
+                @Phone,
+                @Address,
+                @TaxId,
+                @SourceChannel,
+                @ShippingAddress,
+                @ShippingEmail,
+                @ShippingPhone,
+                @Notes,
+                SYSUTCDATETIME()
+            );
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        Guid createdId;
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            cmd.Parameters.AddWithValue("@Name", normalizedName);
+            cmd.Parameters.AddWithValue("@ContactName", DbNullIfEmpty(request.ContactName));
+            cmd.Parameters.AddWithValue("@OrganizationName", DbNullIfEmpty(request.OrganizationName));
+            cmd.Parameters.AddWithValue("@BranchName", DbNullIfEmpty(request.BranchName));
+            cmd.Parameters.AddWithValue("@Email", DbNullIfEmpty(request.Email));
+            cmd.Parameters.AddWithValue("@Phone", DbNullIfEmpty(request.Phone));
+            cmd.Parameters.AddWithValue("@Address", DbNullIfEmpty(request.Address));
+            cmd.Parameters.AddWithValue("@TaxId", DbNullIfEmpty(request.TaxId));
+            cmd.Parameters.AddWithValue("@SourceChannel", DbNullIfEmpty(request.SourceChannel));
+            cmd.Parameters.AddWithValue("@ShippingAddress", DbNullIfEmpty(request.ShippingAddress));
+            cmd.Parameters.AddWithValue("@ShippingEmail", DbNullIfEmpty(request.ShippingEmail));
+            cmd.Parameters.AddWithValue("@ShippingPhone", DbNullIfEmpty(request.ShippingPhone));
+            cmd.Parameters.AddWithValue("@Notes", DbNullIfEmpty(request.Notes));
+            createdId = (Guid)(await cmd.ExecuteScalarAsync(cancellationToken) ?? Guid.Empty);
+        }
+
+        var created = await GetSupplierByIdAsync(createdId, cancellationToken);
+        if (created is null)
+        {
+            throw new InvalidOperationException("Supplier was created but could not be read back.");
+        }
+
+        return created;
+    }
+
+    public async Task<SupplierResponse?> UpdateSupplierAsync(
+        Guid supplierId,
+        SupplierUpsertRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var existing = await GetSupplierByIdAsync(supplierId, cancellationToken);
+        if (existing is null)
+        {
+            return null;
+        }
+
+        var normalizedName = string.IsNullOrWhiteSpace(request.Name)
+            ? existing.Name
+            : request.Name.Trim();
+
+        const string sql = """
+            UPDATE dbo.suppliers
+            SET
+                name = @Name,
+                contact_name = @ContactName,
+                organization_name = @OrganizationName,
+                branch_name = @BranchName,
+                email = @Email,
+                phone = @Phone,
+                address = @Address,
+                tax_id = @TaxId,
+                source_channel = @SourceChannel,
+                shipping_address = @ShippingAddress,
+                shipping_email = @ShippingEmail,
+                shipping_phone = @ShippingPhone,
+                notes = @Notes,
+                updated_at_utc = SYSUTCDATETIME()
+            WHERE id = @SupplierId;
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            cmd.Parameters.AddWithValue("@SupplierId", supplierId);
+            cmd.Parameters.AddWithValue("@Name", normalizedName);
+            cmd.Parameters.AddWithValue("@ContactName", request.ContactName is null ? DbNullIfEmpty(existing.ContactName) : DbNullIfEmpty(request.ContactName));
+            cmd.Parameters.AddWithValue("@OrganizationName", request.OrganizationName is null ? DbNullIfEmpty(existing.OrganizationName) : DbNullIfEmpty(request.OrganizationName));
+            cmd.Parameters.AddWithValue("@BranchName", request.BranchName is null ? DbNullIfEmpty(existing.BranchName) : DbNullIfEmpty(request.BranchName));
+            cmd.Parameters.AddWithValue("@Email", request.Email is null ? DbNullIfEmpty(existing.Email) : DbNullIfEmpty(request.Email));
+            cmd.Parameters.AddWithValue("@Phone", request.Phone is null ? DbNullIfEmpty(existing.Phone) : DbNullIfEmpty(request.Phone));
+            cmd.Parameters.AddWithValue("@Address", request.Address is null ? DbNullIfEmpty(existing.Address) : DbNullIfEmpty(request.Address));
+            cmd.Parameters.AddWithValue("@TaxId", request.TaxId is null ? DbNullIfEmpty(existing.TaxId) : DbNullIfEmpty(request.TaxId));
+            cmd.Parameters.AddWithValue("@SourceChannel", request.SourceChannel is null ? DbNullIfEmpty(existing.SourceChannel) : DbNullIfEmpty(request.SourceChannel));
+            cmd.Parameters.AddWithValue("@ShippingAddress", request.ShippingAddress is null ? DbNullIfEmpty(existing.ShippingAddress) : DbNullIfEmpty(request.ShippingAddress));
+            cmd.Parameters.AddWithValue("@ShippingEmail", request.ShippingEmail is null ? DbNullIfEmpty(existing.ShippingEmail) : DbNullIfEmpty(request.ShippingEmail));
+            cmd.Parameters.AddWithValue("@ShippingPhone", request.ShippingPhone is null ? DbNullIfEmpty(existing.ShippingPhone) : DbNullIfEmpty(request.ShippingPhone));
+            cmd.Parameters.AddWithValue("@Notes", request.Notes is null ? DbNullIfEmpty(existing.Notes) : DbNullIfEmpty(request.Notes));
+            var rows = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            if (rows <= 0)
+            {
+                return null;
+            }
+        }
+
+        return await GetSupplierByIdAsync(supplierId, cancellationToken);
+    }
+
+    public async Task<bool> DeleteSupplierAsync(Guid supplierId, CancellationToken cancellationToken = default)
+    {
+        const string sql = "DELETE FROM dbo.suppliers WHERE id = @SupplierId;";
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@SupplierId", supplierId);
+        var rows = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        return rows > 0;
+    }
+
+    public async Task<IReadOnlyList<SupplierPurchaseHistoryResponse>> GetSupplierPurchaseHistoryAsync(
+        Guid supplierId,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+            SELECT TOP (@Limit)
+                id,
+                supplier_id,
+                purchase_date,
+                reference_no,
+                description,
+                currency_code,
+                subtotal_amount,
+                tax_amount,
+                total_amount,
+                status,
+                notes,
+                attachment_urls_json,
+                created_at_utc,
+                updated_at_utc
+            FROM dbo.supplier_purchase_history
+            WHERE supplier_id = @SupplierId
+            ORDER BY COALESCE(purchase_date, CONVERT(DATE, created_at_utc)) DESC, id DESC;
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        var items = new List<SupplierPurchaseHistoryResponse>();
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@SupplierId", supplierId);
+        cmd.Parameters.AddWithValue("@Limit", Math.Clamp(limit, 1, 300));
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            items.Add(MapSupplierPurchaseHistory(reader));
+        }
+
+        return items;
+    }
+
+    public async Task<SupplierPurchaseHistoryResponse> CreateSupplierPurchaseHistoryAsync(
+        Guid supplierId,
+        SupplierPurchaseUpsertRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var existing = await GetSupplierByIdAsync(supplierId, cancellationToken);
+        if (existing is null)
+        {
+            throw new ArgumentException("Supplier not found.");
+        }
+
+        var currencyCode = string.IsNullOrWhiteSpace(request.CurrencyCode) ? "THB" : request.CurrencyCode.Trim().ToUpperInvariant();
+        var status = string.IsNullOrWhiteSpace(request.Status) ? "recorded" : request.Status.Trim();
+
+        const string sql = """
+            INSERT INTO dbo.supplier_purchase_history (
+                supplier_id,
+                purchase_date,
+                reference_no,
+                description,
+                currency_code,
+                subtotal_amount,
+                tax_amount,
+                total_amount,
+                status,
+                notes,
+                attachment_urls_json,
+                updated_at_utc
+            )
+            OUTPUT INSERTED.id
+            VALUES (
+                @SupplierId,
+                @PurchaseDate,
+                @ReferenceNo,
+                @Description,
+                @CurrencyCode,
+                @SubtotalAmount,
+                @TaxAmount,
+                @TotalAmount,
+                @Status,
+                @Notes,
+                @AttachmentUrlsJson,
+                SYSUTCDATETIME()
+            );
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        long createdId;
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            cmd.Parameters.AddWithValue("@SupplierId", supplierId);
+            cmd.Parameters.AddWithValue("@PurchaseDate", DbValue(request.PurchaseDate));
+            cmd.Parameters.AddWithValue("@ReferenceNo", DbNullIfEmpty(request.ReferenceNo));
+            cmd.Parameters.AddWithValue("@Description", DbNullIfEmpty(request.Description));
+            cmd.Parameters.AddWithValue("@CurrencyCode", currencyCode);
+            cmd.Parameters.AddWithValue("@SubtotalAmount", DbValue(request.SubtotalAmount));
+            cmd.Parameters.AddWithValue("@TaxAmount", DbValue(request.TaxAmount));
+            cmd.Parameters.AddWithValue("@TotalAmount", DbValue(request.TotalAmount));
+            cmd.Parameters.AddWithValue("@Status", status);
+            cmd.Parameters.AddWithValue("@Notes", DbNullIfEmpty(request.Notes));
+            cmd.Parameters.AddWithValue("@AttachmentUrlsJson", SerializeJsonArray(request.AttachmentUrls));
+            createdId = Convert.ToInt64(await cmd.ExecuteScalarAsync(cancellationToken) ?? 0L);
+        }
+
+        const string readSql = """
+            SELECT TOP 1
+                id,
+                supplier_id,
+                purchase_date,
+                reference_no,
+                description,
+                currency_code,
+                subtotal_amount,
+                tax_amount,
+                total_amount,
+                status,
+                notes,
+                attachment_urls_json,
+                created_at_utc,
+                updated_at_utc
+            FROM dbo.supplier_purchase_history
+            WHERE id = @Id;
+            """;
+
+        await using var readCmd = new SqlCommand(readSql, conn);
+        readCmd.Parameters.AddWithValue("@Id", createdId);
+        await using var reader = await readCmd.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            throw new InvalidOperationException("Supplier purchase history entry was created but could not be read back.");
+        }
+
+        return MapSupplierPurchaseHistory(reader);
     }
 
     public async Task<PagedResponse<PlatformActivityLogResponse>> GetPlatformActivityAsync(
@@ -568,6 +1040,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 mp.total_cost,
                 mp.selling_price,
                 mp.maximum_discounted_price,
+                mp.budget,
                 mp.completion_date,
                 mp.custom_order,
                 mp.material,
@@ -639,6 +1112,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 mp.total_cost,
                 mp.selling_price,
                 mp.maximum_discounted_price,
+                mp.budget,
                 mp.completion_date,
                 mp.custom_order,
                 mp.material,
@@ -820,6 +1294,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 total_cost,
                 selling_price,
                 maximum_discounted_price,
+                budget,
                 completion_date,
                 custom_order,
                 material,
@@ -847,6 +1322,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 @TotalCost,
                 @SellingPrice,
                 @MaximumDiscountedPrice,
+                @Budget,
                 @CompletionDate,
                 @CustomOrder,
                 @Material,
@@ -897,6 +1373,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             var gemstoneCost = gemstonesForSave.Sum(item => item.LineCost ?? 0m);
             var totalCost = settingCost + diamondCost + gemstoneCost;
             var maximumDiscountedPrice = request.MaximumDiscountedPrice ?? 0m;
+            var budget = request.Budget;
             var material = string.IsNullOrWhiteSpace(request.Material) ? null : request.Material.Trim();
             var metalPlating = NormalizeSingleSelection(request.MetalPlating);
 
@@ -918,6 +1395,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 insertCmd.Parameters.AddWithValue("@TotalCost", totalCost);
                 insertCmd.Parameters.AddWithValue("@SellingPrice", request.SellingPrice ?? 0m);
                 insertCmd.Parameters.AddWithValue("@MaximumDiscountedPrice", maximumDiscountedPrice);
+                insertCmd.Parameters.AddWithValue("@Budget", DbValue(budget));
                 insertCmd.Parameters.AddWithValue("@CompletionDate", DbValue(request.CompletionDate));
                 insertCmd.Parameters.AddWithValue("@CustomOrder", customOrder);
                 insertCmd.Parameters.AddWithValue("@Material", DbNullIfEmpty(material));
@@ -1003,6 +1481,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         var settingCost = request.SettingCost ?? existing.SettingCost;
         var diamondCost = request.DiamondCost ?? existing.DiamondCost;
         var maximumDiscountedPrice = request.MaximumDiscountedPrice ?? existing.MaximumDiscountedPrice;
+        var budget = request.Budget ?? existing.Budget;
         var customOrder = request.CustomOrder ?? existing.CustomOrder;
         var material = request.Material is null ? existing.Material : (string.IsNullOrWhiteSpace(request.Material) ? null : request.Material.Trim());
 
@@ -1030,6 +1509,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 total_cost = @TotalCost,
                 selling_price = @SellingPrice,
                 maximum_discounted_price = @MaximumDiscountedPrice,
+                budget = @Budget,
                 completion_date = @CompletionDate,
                 custom_order = @CustomOrder,
                 material = @Material,
@@ -1057,7 +1537,9 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 projectId,
                 existing.Status,
                 status,
-                existing.UsageNotes,
+                request.UsageNotes ?? existing.UsageNotes,
+                request.ActivityNote,
+                request.ActivityPhotos,
                 cancellationToken);
 
             var updateStepRequirement = await GetStepRequirementAsync(conn, tx, status, cancellationToken);
@@ -1107,6 +1589,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 updateCmd.Parameters.AddWithValue("@TotalCost", totalCost);
                 updateCmd.Parameters.AddWithValue("@SellingPrice", request.SellingPrice ?? existing.SellingPrice);
                 updateCmd.Parameters.AddWithValue("@MaximumDiscountedPrice", maximumDiscountedPrice);
+                updateCmd.Parameters.AddWithValue("@Budget", DbValue(budget));
                 updateCmd.Parameters.AddWithValue("@CompletionDate", DbValue(completionDate));
                 updateCmd.Parameters.AddWithValue("@CustomOrder", customOrder);
                 updateCmd.Parameters.AddWithValue("@Material", DbNullIfEmpty(material));
@@ -1361,6 +1844,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
                 mp.total_cost,
                 mp.selling_price,
                 mp.maximum_discounted_price,
+                mp.budget,
                 mp.completion_date,
                 mp.custom_order,
                 mp.material,
@@ -1917,6 +2401,24 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         }
     }
 
+    private static string BuildSupplierSearchWhereClause(string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return string.Empty;
+        }
+
+        return "WHERE (s.name LIKE @Search OR s.organization_name LIKE @Search OR s.contact_name LIKE @Search OR s.email LIKE @Search OR s.phone LIKE @Search)";
+    }
+
+    private static void ApplySupplierSearchParams(SqlCommand command, string? search)
+    {
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            command.Parameters.AddWithValue("@Search", $"%{search.Trim()}%");
+        }
+    }
+
     private static string BuildPlatformActivityWhereClause(string? search, string? category)
     {
         var clauses = new List<string>();
@@ -2053,6 +2555,8 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         string currentStatus,
         string nextStatus,
         string? usageNotes,
+        string? pendingActivityNote,
+        IReadOnlyList<string>? pendingActivityPhotos,
         CancellationToken cancellationToken)
     {
         if (string.Equals(currentStatus, nextStatus, StringComparison.OrdinalIgnoreCase))
@@ -2078,15 +2582,17 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             projectId,
             currentStatus,
             projectPhotos: null,
-            activityPhotos: null,
+            activityPhotos: pendingActivityPhotos,
             cancellationToken);
-        var hasCommentEvidence = !currentRequirements.RequireComment || await HasStepCommentEvidenceAsync(
-            conn,
-            tx,
-            projectId,
-            currentStatus,
-            usageNotes,
-            cancellationToken);
+        var hasCommentEvidence = !currentRequirements.RequireComment ||
+            !string.IsNullOrWhiteSpace(pendingActivityNote) ||
+            await HasStepCommentEvidenceAsync(
+                conn,
+                tx,
+                projectId,
+                currentStatus,
+                usageNotes,
+                cancellationToken);
 
         if (!hasPhotoEvidence || !hasCommentEvidence)
         {
@@ -2995,11 +3501,58 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             Address = GetNullableString(reader, "address"),
             Notes = GetNullableString(reader, "notes"),
             PhotoUrl = GetNullableString(reader, "photo_url"),
+            Photos = DeserializeJsonArray(GetNullableString(reader, "photos_json")),
             CustomerSince = GetNullableDateTime(reader, "customer_since"),
             CreatedAtUtc = GetDateTime(reader, "created_at_utc"),
             UpdatedAtUtc = GetDateTime(reader, "updated_at_utc"),
             TotalSpent = GetDecimal(reader, "total_spent"),
             PurchaseCount = GetInt32(reader, "purchase_count"),
+        };
+    }
+
+    private static SupplierResponse MapSupplier(SqlDataReader reader)
+    {
+        return new SupplierResponse
+        {
+            Id = GetGuid(reader, "id"),
+            Name = GetString(reader, "name"),
+            ContactName = GetNullableString(reader, "contact_name"),
+            OrganizationName = GetNullableString(reader, "organization_name"),
+            BranchName = GetNullableString(reader, "branch_name"),
+            Email = GetNullableString(reader, "email"),
+            Phone = GetNullableString(reader, "phone"),
+            Address = GetNullableString(reader, "address"),
+            TaxId = GetNullableString(reader, "tax_id"),
+            SourceChannel = GetNullableString(reader, "source_channel"),
+            ShippingAddress = GetNullableString(reader, "shipping_address"),
+            ShippingEmail = GetNullableString(reader, "shipping_email"),
+            ShippingPhone = GetNullableString(reader, "shipping_phone"),
+            Notes = GetNullableString(reader, "notes"),
+            CreatedAtUtc = GetDateTime(reader, "created_at_utc"),
+            UpdatedAtUtc = GetDateTime(reader, "updated_at_utc"),
+            TotalPurchasedAmount = GetDecimal(reader, "total_purchased_amount"),
+            PurchaseCount = GetInt32(reader, "purchase_count"),
+        };
+    }
+
+    private static SupplierPurchaseHistoryResponse MapSupplierPurchaseHistory(SqlDataReader reader)
+    {
+        return new SupplierPurchaseHistoryResponse
+        {
+            Id = GetInt64(reader, "id"),
+            SupplierId = GetGuid(reader, "supplier_id"),
+            PurchaseDate = GetNullableDateTime(reader, "purchase_date"),
+            ReferenceNo = GetNullableString(reader, "reference_no"),
+            Description = GetNullableString(reader, "description"),
+            CurrencyCode = GetString(reader, "currency_code"),
+            SubtotalAmount = GetNullableDecimal(reader, "subtotal_amount"),
+            TaxAmount = GetNullableDecimal(reader, "tax_amount"),
+            TotalAmount = GetNullableDecimal(reader, "total_amount"),
+            Status = GetString(reader, "status"),
+            Notes = GetNullableString(reader, "notes"),
+            AttachmentUrls = DeserializeJsonArray(GetNullableString(reader, "attachment_urls_json")),
+            CreatedAtUtc = GetDateTime(reader, "created_at_utc"),
+            UpdatedAtUtc = GetDateTime(reader, "updated_at_utc"),
         };
     }
 
@@ -3037,6 +3590,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             TotalCost = GetDecimal(reader, "total_cost"),
             SellingPrice = GetDecimal(reader, "selling_price"),
             MaximumDiscountedPrice = GetDecimal(reader, "maximum_discounted_price"),
+            Budget = GetNullableDecimal(reader, "budget"),
             CompletionDate = GetNullableDateTime(reader, "completion_date"),
             CustomOrder = GetBoolean(reader, "custom_order"),
             Material = GetNullableString(reader, "material"),
@@ -3070,6 +3624,7 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             TotalCost = GetDecimal(reader, "total_cost"),
             SellingPrice = GetDecimal(reader, "selling_price"),
             MaximumDiscountedPrice = GetDecimal(reader, "maximum_discounted_price"),
+            Budget = GetNullableDecimal(reader, "budget"),
             CompletionDate = GetNullableDateTime(reader, "completion_date"),
             CustomOrder = GetBoolean(reader, "custom_order"),
             Material = GetNullableString(reader, "material"),
@@ -3209,6 +3764,17 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         }
 
         return Convert.ToInt32(reader.GetValue(ordinal));
+    }
+
+    private static long GetInt64(SqlDataReader reader, string columnName)
+    {
+        var ordinal = GetOrdinal(reader, columnName);
+        if (reader.IsDBNull(ordinal))
+        {
+            return 0L;
+        }
+
+        return Convert.ToInt64(reader.GetValue(ordinal));
     }
 
     private static bool GetBoolean(SqlDataReader reader, string columnName)

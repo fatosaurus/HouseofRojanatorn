@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, BarChart3, ChevronLeft, ChevronRight, Expand, Factory, Gem, History, LogOut, Plus, Settings, ShoppingBag, Users, X } from 'lucide-react'
+import { ArrowLeft, BarChart3, ChevronLeft, ChevronRight, Expand, Factory, Gem, History, LogOut, Plus, Settings, ShoppingBag, Truck, Users, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { createInventoryItem, getInventoryItem, getInventoryItems, getInventorySummary, restockInventoryItem } from '../api/client'
@@ -11,12 +11,14 @@ import { HistoryPanel } from '../components/dashboard/HistoryPanel'
 import { ManufacturingPanel } from '../components/dashboard/ManufacturingPanel'
 import { PurchasesPanel } from '../components/dashboard/PurchasesPanel'
 import { SettingsPanel } from '../components/dashboard/SettingsPanel'
+import { SuppliersPanel } from '../components/dashboard/SuppliersPanel'
 
-type DashboardTab = 'customers' | 'purchases' | 'inventory' | 'manufacturing' | 'history' | 'analytics' | 'settings'
+type DashboardTab = 'customers' | 'suppliers' | 'purchases' | 'inventory' | 'manufacturing' | 'history' | 'analytics' | 'settings'
 const INVENTORY_PAGE_SIZE = 50
 
 const DASHBOARD_TABS: DashboardTab[] = [
   'customers',
+  'suppliers',
   'purchases',
   'inventory',
   'manufacturing',
@@ -27,6 +29,7 @@ const DASHBOARD_TABS: DashboardTab[] = [
 
 const SIDEBAR_ITEMS: Array<{ tab: DashboardTab, label: string, Icon: LucideIcon }> = [
   { tab: 'customers', label: 'Customers', Icon: Users },
+  { tab: 'suppliers', label: 'Suppliers', Icon: Truck },
   { tab: 'purchases', label: 'Purchases', Icon: ShoppingBag },
   { tab: 'inventory', label: 'Gemstones', Icon: Gem },
   { tab: 'manufacturing', label: 'Manufacturing', Icon: Factory },
@@ -129,6 +132,7 @@ interface NewGemstoneDraft {
 
 interface RestockGemstoneDraft {
   inventoryItemId: string
+  lookup: string
   additionalCt: string
   additionalPcs: string
   buyingDate: string
@@ -151,12 +155,17 @@ const EMPTY_NEW_GEMSTONE_DRAFT: NewGemstoneDraft = {
 
 const EMPTY_RESTOCK_DRAFT: RestockGemstoneDraft = {
   inventoryItemId: '',
+  lookup: '',
   additionalCt: '',
   additionalPcs: '',
   buyingDate: '',
   ownerName: '',
   parsedPricePerCt: '',
   parsedPricePerPiece: ''
+}
+
+function inventoryLabel(item: InventoryItem): string {
+  return `${item.gemstoneNumber ?? item.gemstoneNumberText ?? item.id} • ${item.gemstoneType ?? '-'} • ${item.shape ?? '-'}`
 }
 
 function parseOptionalNumber(value: string): number | null {
@@ -565,6 +574,17 @@ export function DashboardPage() {
     return [...values].sort((a, b) => a.localeCompare(b))
   }, [inventory])
 
+  const restockCandidates = useMemo(() => {
+    const lookup = restockDraft.lookup.trim().toLowerCase()
+    if (!lookup) {
+      return inventory.slice(0, 15)
+    }
+
+    return inventory
+      .filter(item => inventoryLabel(item).toLowerCase().includes(lookup))
+      .slice(0, 15)
+  }, [inventory, restockDraft.lookup])
+
   function openInventoryDetail(itemId: number) {
     navigate(`/dashboard/inventory/${itemId}`)
   }
@@ -619,7 +639,7 @@ export function DashboardPage() {
       </div>
 
       <>
-        <div className="filter-grid">
+        <div className="filter-grid inventory-filter-grid">
           <input
             placeholder="Search type, shape, owner, or code"
             value={inventorySearch}
@@ -692,19 +712,30 @@ export function DashboardPage() {
 
         {isRestockingGemstone ? (
           <div className="crm-form-grid">
-              <label className="crm-form-span">
-                Existing Gemstone
-                <select value={restockDraft.inventoryItemId} onChange={event => setRestockDraft(current => ({ ...current, inventoryItemId: event.target.value }))}>
-                  <option value="">Select gemstone</option>
-                  {inventory.map(item => (
-                    <option key={item.id} value={String(item.id)}>
-                      {(item.gemstoneNumber ?? item.gemstoneNumberText ?? item.id)}
-                      {' • '}
-                      {item.gemstoneType ?? '-'}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <label className="crm-form-span">
+              Existing Gemstone (Search and Select)
+              <input
+                value={restockDraft.lookup}
+                placeholder="Type code, type, or shape"
+                onChange={event => setRestockDraft(current => ({ ...current, lookup: event.target.value, inventoryItemId: '' }))}
+              />
+            </label>
+            <div className="crm-form-span inventory-lookup-list">
+              {restockCandidates.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`inventory-lookup-option ${restockDraft.inventoryItemId === String(item.id) ? 'selected' : ''}`}
+                  onClick={() => setRestockDraft(current => ({
+                    ...current,
+                    inventoryItemId: String(item.id),
+                    lookup: inventoryLabel(item)
+                  }))}
+                >
+                  {inventoryLabel(item)}
+                </button>
+              ))}
+            </div>
               <label>
                 Additional CT
                 <input value={restockDraft.additionalCt} onChange={event => setRestockDraft(current => ({ ...current, additionalCt: event.target.value }))} />
@@ -885,6 +916,8 @@ export function DashboardPage() {
 
         {activeTab === 'customers' ? (
           <CustomersPanel />
+        ) : activeTab === 'suppliers' ? (
+          <SuppliersPanel />
         ) : activeTab === 'manufacturing' ? (
           <ManufacturingPanel />
         ) : activeTab === 'purchases' ? (

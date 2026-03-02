@@ -63,6 +63,33 @@ Dry run (parse only):
 python3 tools/db/import_stock_workbook.py --dry-run
 ```
 
+## Import Customers + Suppliers Workbook
+
+`import_customers_suppliers_workbook.py` parses `Customers & Suppliers.xlsx` and writes:
+
+- `dbo.customers` (upsert by `source_system + source_contact_id`)
+- `dbo.suppliers`
+- `dbo.supplier_purchase_history` schema is created via migration for later use
+
+Run schema migration first:
+
+```bash
+dotnet run --project tools/db/SqlRunner -f net10.0 -- --file migrations/009_suppliers_and_contact_import_schema.sql
+```
+
+Run import:
+
+```bash
+python3 tools/db/import_customers_suppliers_workbook.py \
+  --excel-path "/Users/suzieleedhirakul/Downloads/Customers & Suppliers.xlsx"
+```
+
+Dry run:
+
+```bash
+python3 tools/db/import_customers_suppliers_workbook.py --dry-run
+```
+
 ## Rebuild Manufacturing From Usage Import
 
 Use this when usage batches/lines should be treated as manufacturing records:
