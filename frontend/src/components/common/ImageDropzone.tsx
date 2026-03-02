@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ImagePlus, UploadCloud, X } from 'lucide-react'
+import { ImagePlus, Trash2, UploadCloud } from 'lucide-react'
 
 async function readFileAsDataUrl(file: File): Promise<string> {
   return await new Promise((resolve, reject) => {
@@ -26,6 +26,9 @@ interface ImageDropzoneProps {
   saveLabel?: string
   isSaving?: boolean
   saveDisabled?: boolean
+  compact?: boolean
+  confirmDelete?: boolean
+  onPreviewOpen?: (index: number) => void
 }
 
 export function ImageDropzone({
@@ -37,7 +40,10 @@ export function ImageDropzone({
   onSave,
   saveLabel = 'Save',
   isSaving = false,
-  saveDisabled = false
+  saveDisabled = false,
+  compact = false,
+  confirmDelete = false,
+  onPreviewOpen
 }: ImageDropzoneProps) {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -59,12 +65,64 @@ export function ImageDropzone({
     }
   }
 
+  function removeImage(index: number) {
+    if (confirmDelete && !window.confirm('Delete this image?')) {
+      return
+    }
+    onChange(images.filter((_, currentIndex) => currentIndex !== index))
+  }
+
+  const imageGrid = images.length > 0 ? (
+    <div className="image-grid">
+      {images.map((image, index) => (
+        <article
+          key={`${image.slice(0, 32)}-${index}`}
+          className={`image-card ${onPreviewOpen ? 'is-clickable' : ''}`}
+          role={onPreviewOpen ? 'button' : undefined}
+          tabIndex={onPreviewOpen ? 0 : undefined}
+          onClick={() => onPreviewOpen?.(index)}
+          onKeyDown={event => {
+            if (!onPreviewOpen) {
+              return
+            }
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              onPreviewOpen(index)
+            }
+          }}
+        >
+          <img src={image} alt={`Uploaded ${index + 1}`} />
+          <button
+            type="button"
+            className="icon-btn image-remove-btn"
+            onClick={event => {
+              event.stopPropagation()
+              removeImage(index)
+            }}
+            aria-label="Delete image"
+            title="Delete image"
+          >
+            <Trash2 size={12} />
+          </button>
+        </article>
+      ))}
+    </div>
+  ) : null
+
   return (
-    <div className="image-dropzone-wrap">
-      <p className="image-dropzone-title">{title}</p>
+    <div className={`image-dropzone-wrap ${compact ? 'image-dropzone-wrap-compact' : ''}`}>
+      <div className="image-dropzone-head">
+        <p className="image-dropzone-title">{title}</p>
+        <button type="button" className="secondary-btn" onClick={() => inputRef.current?.click()}>
+          <ImagePlus size={14} />
+          Select Images
+        </button>
+      </div>
       {helperText ? <p className="inline-subtext">{helperText}</p> : null}
       <div
-        className={`image-dropzone ${isDragging ? 'dragging' : ''}`}
+        className={compact
+          ? `image-dropzone-compact-surface ${isDragging ? 'dragging' : ''}`
+          : `image-dropzone ${isDragging ? 'dragging' : ''}`}
         onDragOver={event => {
           event.preventDefault()
           setIsDragging(true)
@@ -89,33 +147,27 @@ export function ImageDropzone({
             event.currentTarget.value = ''
           }}
         />
-        <button type="button" className="secondary-btn" onClick={() => inputRef.current?.click()}>
-          <ImagePlus size={14} />
-          Select Images
-        </button>
-        <p>{isLoading ? 'Loading images...' : 'Drag and drop photos here, or choose files.'}</p>
-        <p className="image-dropzone-count">{images.length}/{maxFiles} uploaded</p>
-        <UploadCloud size={22} />
+
+        {compact ? (
+          <>
+            {images.length === 0 ? (
+              <div className="image-dropzone-compact-empty">
+                <UploadCloud size={20} />
+                <p>{isLoading ? 'Loading images...' : 'Drop photos anywhere in this area.'}</p>
+              </div>
+            ) : null}
+            {imageGrid}
+          </>
+        ) : (
+          <>
+            <p>{isLoading ? 'Loading images...' : 'Drag and drop photos here, or choose files.'}</p>
+            <p className="image-dropzone-count">{images.length}/{maxFiles} uploaded</p>
+            <UploadCloud size={22} />
+          </>
+        )}
       </div>
 
-      {images.length > 0 ? (
-        <div className="image-grid">
-          {images.map((image, index) => (
-            <article key={`${image.slice(0, 32)}-${index}`} className="image-card">
-              <img src={image} alt={`Uploaded ${index + 1}`} />
-              <button
-                type="button"
-                className="icon-btn image-remove-btn"
-                onClick={() => onChange(images.filter((_, currentIndex) => currentIndex !== index))}
-                aria-label="Remove image"
-                title="Remove image"
-              >
-                <X size={14} />
-              </button>
-            </article>
-          ))}
-        </div>
-      ) : null}
+      {!compact ? imageGrid : null}
 
       {onSave ? (
         <div className="crm-form-actions">
