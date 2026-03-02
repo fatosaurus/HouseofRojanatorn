@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Expand, Pencil, Plus, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Expand, Pencil, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { addCustomerNote, createCustomer, getCustomer, getCustomerActivity, getCustomerPurchasedPhotos, getCustomers, updateCustomer } from '../../api/client'
 import type { Customer, CustomerActivity, CustomerPurchasedPhoto } from '../../api/types'
+import { useSession } from '../../app/useSession'
 import { ImageDropzone } from '../common/ImageDropzone'
 
 function formatCurrency(value: number): string {
@@ -47,29 +48,39 @@ function customerAvatarUrl(customer: Customer): string | null {
   return null
 }
 
-function formatActivityDateTime(raw: string | null | undefined): string {
-  if (!raw) {
-    return '-'
-  }
-
-  const parsed = new Date(raw)
-  if (Number.isNaN(parsed.getTime())) {
-    return raw
-  }
-
-  return parsed.toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
+async function readFileAsDataUrl(file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('Unable to read image file.'))
+        return
+      }
+      resolve(reader.result)
+    }
+    reader.onerror = () => reject(new Error('Unable to read image file.'))
+    reader.readAsDataURL(file)
   })
+}
+
+function getDisplayNameFromEmail(email: string): string {
+  const local = email.split('@')[0]?.trim() ?? ''
+  if (!local) {
+    return 'User'
+  }
+
+  return local
+    .split(/[._-]+/g)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
 }
 
 interface CustomerNoteEntry {
   id: string
   body: string
   createdAtUtc: string | null
+  author: string
 }
 
 function parseCustomerNotes(rawNotes: string | null | undefined): CustomerNoteEntry[] {
@@ -85,7 +96,15 @@ function parseCustomerNotes(rawNotes: string | null | undefined): CustomerNoteEn
   const entries = blocks.map((block, index) => {
     const match = block.match(/^\[(?<timestamp>[^\]]+)\]\s*(?<text>[\s\S]*)$/)
     const timestamp = match?.groups?.timestamp?.trim() ?? null
-    const body = match?.groups?.text?.trim() ?? block
+    const fullBody = match?.groups?.text?.trim() ?? block
+    const authorMatch = fullBody.match(/^by\s+(?<author>[^|:]+?)\s*(?:\||:)\s*(?<body>[\s\S]*)$/i)
+    const createdByMatch = fullBody.match(/^created by\s+(?<author>[^[]+?)\s*(?<body>\[[\s\S]*)$/i)
+    const author = authorMatch?.groups?.author?.trim()
+      ?? createdByMatch?.groups?.author?.trim()
+      ?? 'System'
+    const body = authorMatch?.groups?.body?.trim()
+      ?? createdByMatch?.groups?.body?.trim()
+      ?? fullBody
     const parsedTimestamp = timestamp ? new Date(timestamp) : null
     const createdAtUtc = parsedTimestamp && !Number.isNaN(parsedTimestamp.getTime())
       ? parsedTimestamp.toISOString()
@@ -94,25 +113,54 @@ function parseCustomerNotes(rawNotes: string | null | undefined): CustomerNoteEn
     return {
       id: `${createdAtUtc ?? 'note'}-${index}`,
       body,
-      createdAtUtc
+      createdAtUtc,
+      author
     } satisfies CustomerNoteEntry
   })
 
   return entries.reverse()
 }
 
-function shouldShowNoteTimestamp(createdAtUtc: string | null): boolean {
-  if (!createdAtUtc) {
-    return false
+function formatCustomerNoteMeta(note: CustomerNoteEntry): string {
+  if (!note.createdAtUtc) {
+    return `by ${note.author}`
   }
 
-  const parsed = new Date(createdAtUtc)
+  const parsed = new Date(note.createdAtUtc)
   if (Number.isNaN(parsed.getTime())) {
-    return false
+    return `by ${note.author}`
   }
 
   const elapsedMs = Date.now() - parsed.getTime()
-  return elapsedMs >= 24 * 60 * 60 * 1000
+  const minuteMs = 60 * 1000
+  const hourMs = 60 * minuteMs
+  const dayMs = 24 * hourMs
+
+  if (elapsedMs < dayMs) {
+    if (elapsedMs < minuteMs) {
+      return `by ${note.author} just now`
+    }
+
+    if (elapsedMs < hourMs) {
+      const minutes = Math.max(1, Math.floor(elapsedMs / minuteMs))
+      return `by ${note.author} ${minutes} min${minutes === 1 ? '' : 's'} ago`
+    }
+
+    const hours = Math.max(1, Math.floor(elapsedMs / hourMs))
+    return `by ${note.author} ${hours} hr${hours === 1 ? '' : 's'} ago`
+  }
+
+  const datePart = parsed.toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short'
+  })
+  const timePart = parsed.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
+  return `by ${note.author} ${datePart} at ${timePart}`
 }
 
 interface CustomerDraft {
@@ -189,8 +237,8 @@ interface CustomerDetailProps {
   onToggleShowAllNotes: () => void
   onProfilePhotoChange: (photoUrl: string | null) => void
   onPhotosChange: (photos: string[]) => void
+  onOpenImageViewer: (images: string[], index: number) => void
   onEditDraftChange: (patch: Partial<CustomerDraft>) => void
-  onToggleEdit: () => void
   onCancelEdit: () => void
   onSaveEdit: () => void
 }
@@ -213,25 +261,57 @@ function CustomerDetailContent({
   onToggleShowAllNotes,
   onProfilePhotoChange,
   onPhotosChange,
+  onOpenImageViewer,
   onEditDraftChange,
-  onToggleEdit,
   onCancelEdit,
   onSaveEdit
 }: CustomerDetailProps) {
   const avatarUrl = customerAvatarUrl(customer)
   const parsedNotes = useMemo(() => parseCustomerNotes(customer.notes), [customer.notes])
   const visibleNotes = isShowingAllNotes ? parsedNotes : parsedNotes.slice(0, 3)
+  const avatarInputRef = useRef<HTMLInputElement | null>(null)
 
   return (
     <>
       <section className="customer-detail-hero">
-        {avatarUrl ? (
-          <span className="customer-avatar customer-avatar-large customer-avatar-photo">
-            <img src={avatarUrl} alt={customer.name} />
-          </span>
-        ) : (
-          <span className="customer-avatar customer-avatar-large">{getInitial(customer.name)}</span>
-        )}
+        <div className="customer-avatar-upload-wrap">
+          {avatarUrl ? (
+            <span className="customer-avatar customer-avatar-large customer-avatar-photo">
+              <img src={avatarUrl} alt={customer.name} />
+            </span>
+          ) : (
+            <span className="customer-avatar customer-avatar-large">{getInitial(customer.name)}</span>
+          )}
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            className="customer-avatar-input"
+            onChange={event => {
+              const file = event.target.files?.[0]
+              event.currentTarget.value = ''
+              if (!file) {
+                return
+              }
+              void readFileAsDataUrl(file)
+                .then(photoUrl => {
+                  onProfilePhotoChange(photoUrl)
+                })
+                .catch(() => {
+                  // Ignore local file parse failures; parent handles update errors.
+                })
+            }}
+          />
+          <button
+            type="button"
+            className="icon-btn customer-avatar-upload-btn"
+            onClick={() => avatarInputRef.current?.click()}
+            aria-label="Upload profile photo"
+            title="Upload profile photo"
+          >
+            <Pencil size={14} />
+          </button>
+        </div>
         <h4>{customer.name}</h4>
         <p>
           Customer since
@@ -240,18 +320,8 @@ function CustomerDetailContent({
         </p>
       </section>
 
-      <section className="customer-detail-section customer-edit-section">
-        <div className="customer-edit-head">
-          <h4>Edit Profile</h4>
-          {!isEditing ? (
-            <button type="button" className="secondary-btn" onClick={onToggleEdit}>
-              <Pencil size={14} />
-              Edit
-            </button>
-          ) : null}
-        </div>
-
-        {isEditing ? (
+      {isEditing ? (
+        <section className="customer-detail-section customer-edit-section">
           <div className="customer-edit-form">
             <label>
               Name
@@ -281,16 +351,6 @@ function CustomerDetailContent({
               Notes
               <textarea rows={3} value={editDraft.notes} onChange={event => onEditDraftChange({ notes: event.target.value })} />
             </label>
-            <label className="customer-edit-full">
-              Profile Picture
-              <ImageDropzone
-                title="Customer Profile Picture"
-                images={editDraft.photoUrl ? [editDraft.photoUrl] : []}
-                onChange={images => onEditDraftChange({ photoUrl: images[0] ?? '' })}
-                maxFiles={1}
-                helperText="Shown as customer avatar across tables and details."
-              />
-            </label>
             <div className="crm-form-actions customer-edit-full">
               <button type="button" className="secondary-btn" onClick={onCancelEdit} disabled={isSaving}>
                 Cancel
@@ -300,10 +360,8 @@ function CustomerDetailContent({
               </button>
             </div>
           </div>
-        ) : (
-          <p className="panel-placeholder">Use Edit to update customer profile information.</p>
-        )}
-      </section>
+        </section>
+      ) : null}
 
       <section className="customer-detail-section">
         <h4>Contact Information</h4>
@@ -374,9 +432,7 @@ function CustomerDetailContent({
               {visibleNotes.map(note => (
                 <article key={note.id} className="customer-note-bubble">
                   <p>{note.body}</p>
-                  {shouldShowNoteTimestamp(note.createdAtUtc) ? (
-                    <small>{formatActivityDateTime(note.createdAtUtc)}</small>
-                  ) : null}
+                  <small>{formatCustomerNoteMeta(note)}</small>
                 </article>
               ))}
             </div>
@@ -393,13 +449,14 @@ function CustomerDetailContent({
         <h4>Customer Gallery</h4>
         <div className="customer-gallery-stack">
           <div className="customer-gallery-subsection">
-            <div className="customer-gallery-head">
-              <h5>Profile Uploads ({customer.photos.length})</h5>
-            </div>
             <ImageDropzone
-              title="Upload Customer Images"
+              title={`Profile Uploads (${customer.photos.length})`}
+              helperText="Upload customer images"
               images={customer.photos}
               onChange={onPhotosChange}
+              compact
+              confirmDelete
+              onPreviewOpen={index => onOpenImageViewer(customer.photos, index)}
             />
           </div>
 
@@ -414,7 +471,19 @@ function CustomerDetailContent({
             ) : (
               <div className="image-grid customer-product-gallery-grid">
                 {purchasedPhotos.map((photo, index) => (
-                  <article key={`${photo.projectId}-${index}`} className="image-card customer-product-gallery-card">
+                  <article
+                    key={`${photo.projectId}-${index}`}
+                    className="image-card customer-product-gallery-card"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onOpenImageViewer(purchasedPhotos.map(item => item.photoUrl), index)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        onOpenImageViewer(purchasedPhotos.map(item => item.photoUrl), index)
+                      }
+                    }}
+                  >
                     <img src={photo.photoUrl} alt={`${photo.pieceName} ${index + 1}`} />
                     <div className="customer-product-gallery-meta">
                       <strong>{photo.pieceName}</strong>
@@ -427,17 +496,6 @@ function CustomerDetailContent({
             )}
           </div>
         </div>
-      </section>
-
-      <section className="customer-detail-section">
-        <h4>Profile Picture</h4>
-        <ImageDropzone
-          title="Upload Profile Picture"
-          images={customer.photoUrl ? [customer.photoUrl] : []}
-          onChange={images => onProfilePhotoChange(images[0] ?? null)}
-          maxFiles={1}
-          helperText="This image is used as the customer avatar."
-        />
       </section>
 
       <section className="usage-lines customer-detail-section">
@@ -465,6 +523,7 @@ function CustomerDetailContent({
 }
 
 export function CustomersPanel() {
+  const session = useSession()
   const location = useLocation()
   const navigate = useNavigate()
   const route = useMemo(() => parseCustomersRoute(location.pathname), [location.pathname])
@@ -489,6 +548,11 @@ export function CustomersPanel() {
   const [isCreating, setIsCreating] = useState(false)
   const [draft, setDraft] = useState<CustomerDraft>(EMPTY_CUSTOMER_DRAFT)
   const [isSaving, setIsSaving] = useState(false)
+  const [viewerImages, setViewerImages] = useState<string[]>([])
+  const [viewerIndex, setViewerIndex] = useState(0)
+
+  const isViewerOpen = viewerImages.length > 0
+  const viewerImage = isViewerOpen ? viewerImages[viewerIndex] : null
 
   useEffect(() => {
     if (route.isInvalid) {
@@ -532,6 +596,8 @@ export function CustomersPanel() {
       setIsShowingAllNotes(false)
       setIsEditingDetail(false)
       setEditDraft(EMPTY_CUSTOMER_DRAFT)
+      setViewerImages([])
+      setViewerIndex(0)
       return
     }
 
@@ -550,6 +616,8 @@ export function CustomersPanel() {
           setSelectedCustomer(customer)
           setSelectedActivity(activity)
           setSelectedPurchasedPhotos(purchasedPhotos)
+          setViewerImages([])
+          setViewerIndex(0)
           setIsAddingNote(false)
           setIsShowingAllNotes(false)
           setIsEditingDetail(false)
@@ -632,7 +700,12 @@ export function CustomersPanel() {
     setError(null)
 
     try {
-      const maybeUpdated = await addCustomerNote(selectedCustomer.id, noteDraft.trim())
+      const normalized = noteDraft.trim()
+      const authorName = getDisplayNameFromEmail(session.email)
+      const preparedNote = /^by\s+[^|:]+(?:\||:)/i.test(normalized)
+        ? normalized
+        : `by ${authorName} | ${normalized}`
+      const maybeUpdated = await addCustomerNote(selectedCustomer.id, preparedNote)
       const [activity] = await Promise.all([
         getCustomerActivity(selectedCustomer.id, 100),
         loadCustomers(search)
@@ -765,6 +838,51 @@ export function CustomersPanel() {
     navigate('/dashboard/customers')
   }
 
+  function openImageViewer(images: string[], index: number) {
+    if (images.length === 0) {
+      return
+    }
+
+    const boundedIndex = Math.max(0, Math.min(index, images.length - 1))
+    setViewerImages(images)
+    setViewerIndex(boundedIndex)
+  }
+
+  function closeImageViewer() {
+    setViewerImages([])
+    setViewerIndex(0)
+  }
+
+  function goToPreviousImage() {
+    setViewerIndex(current => (current - 1 + viewerImages.length) % viewerImages.length)
+  }
+
+  function goToNextImage() {
+    setViewerIndex(current => (current + 1) % viewerImages.length)
+  }
+
+  useEffect(() => {
+    if (!isViewerOpen) {
+      return
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setViewerImages([])
+        setViewerIndex(0)
+      } else if (event.key === 'ArrowLeft') {
+        setViewerIndex(current => (current - 1 + viewerImages.length) % viewerImages.length)
+      } else if (event.key === 'ArrowRight') {
+        setViewerIndex(current => (current + 1) % viewerImages.length)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [isViewerOpen, viewerImages.length])
+
   function openFullDetail() {
     if (!route.detailId) {
       return
@@ -781,6 +899,32 @@ export function CustomersPanel() {
 
     navigate(`/dashboard/customers/${route.detailId}`)
   }
+
+  const viewerOverlay = isViewerOpen && viewerImage ? (
+    <div className="image-lightbox-backdrop" onClick={closeImageViewer}>
+      <div className="image-lightbox-dialog" onClick={event => event.stopPropagation()}>
+        <div className="image-lightbox-head">
+          <p>{viewerIndex + 1} / {viewerImages.length}</p>
+          <button type="button" className="icon-btn" onClick={closeImageViewer} aria-label="Close image viewer">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="image-lightbox-body">
+          {viewerImages.length > 1 ? (
+            <button type="button" className="icon-btn image-lightbox-nav prev" onClick={goToPreviousImage} aria-label="Previous image">
+              <ChevronLeft size={20} />
+            </button>
+          ) : null}
+          <img src={viewerImage} alt={`Customer image ${viewerIndex + 1}`} />
+          {viewerImages.length > 1 ? (
+            <button type="button" className="icon-btn image-lightbox-nav next" onClick={goToNextImage} aria-label="Next image">
+              <ChevronRight size={20} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  ) : null
 
   const listCard = (
     <section className="content-card">
@@ -895,90 +1039,13 @@ export function CustomersPanel() {
 
   if (route.isFull) {
     return (
-      <section className="content-card detail-page-card">
-        <div className="card-head">
-          <div>
-            <h3>Customer Details</h3>
-            <p>Full page profile view with notes and activity.</p>
-          </div>
-          <div className="detail-actions-row detail-actions-row-compact">
-            <button
-              type="button"
-              className="icon-btn icon-btn-sm"
-              onClick={() => setIsEditingDetail(true)}
-              aria-label="Edit customer profile"
-              title="Edit customer profile"
-            >
-              <Pencil size={16} />
-            </button>
-            <button type="button" className="icon-btn" onClick={closeFullDetail} aria-label="Back to split view" title="Back to split view">
-              <ArrowLeft size={18} />
-            </button>
-            <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail view" title="Close detail view">
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-
-        {isLoadingDetail ? (
-          <p className="panel-placeholder">Loading customer details...</p>
-        ) : selectedCustomer ? (
-          <CustomerDetailContent
-            customer={selectedCustomer}
-            activity={selectedActivity}
-            purchasedPhotos={selectedPurchasedPhotos}
-            isLoadingPurchasedPhotos={isLoadingPurchasedPhotos}
-            noteDraft={noteDraft}
-            isSaving={isSaving}
-            isEditing={isEditingDetail}
-            isAddingNote={isAddingNote}
-            isShowingAllNotes={isShowingAllNotes}
-            editDraft={editDraft}
-            onNoteChange={setNoteDraft}
-            onAddNote={() => {
-              void handleAddNote()
-            }}
-            onStartAddNote={() => setIsAddingNote(true)}
-            onCancelAddNote={() => {
-              setIsAddingNote(false)
-              setNoteDraft('')
-            }}
-            onToggleShowAllNotes={() => setIsShowingAllNotes(current => !current)}
-            onProfilePhotoChange={photoUrl => {
-              void handleCustomerProfilePhotoChange(photoUrl)
-            }}
-            onPhotosChange={photos => {
-              void handleCustomerPhotosChange(photos)
-            }}
-            onEditDraftChange={patch => setEditDraft(current => ({ ...current, ...patch }))}
-            onToggleEdit={() => setIsEditingDetail(true)}
-            onCancelEdit={() => {
-              if (selectedCustomer) {
-                resetEditDraftFromCustomer(selectedCustomer)
-              }
-              setIsEditingDetail(false)
-            }}
-            onSaveEdit={() => {
-              void handleSaveCustomerProfile()
-            }}
-          />
-        ) : (
-          <p className="panel-placeholder">No customer detail found for this route.</p>
-        )}
-      </section>
-    )
-  }
-
-  return (
-    <div className={`content-split ${route.detailId ? 'has-detail' : ''}`}>
-      <div className="content-split-main">
-        {listCard}
-      </div>
-
-      {route.detailId ? (
-        <aside className="detail-side-panel">
-          <div className="drawer-head">
-            <h3>Customer Detail</h3>
+      <>
+        <section className="content-card detail-page-card">
+          <div className="card-head">
+            <div>
+              <h3>Customer Details</h3>
+              <p>Full page profile view with notes and activity.</p>
+            </div>
             <div className="detail-actions-row detail-actions-row-compact">
               <button
                 type="button"
@@ -989,15 +1056,15 @@ export function CustomersPanel() {
               >
                 <Pencil size={16} />
               </button>
-              <button type="button" className="icon-btn" onClick={openFullDetail} aria-label="Open full screen" title="Open full screen">
-                <Expand size={18} />
+              <button type="button" className="icon-btn" onClick={closeFullDetail} aria-label="Back to split view" title="Back to split view">
+                <ArrowLeft size={18} />
               </button>
-              <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail panel" title="Close detail panel">
+              <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail view" title="Close detail view">
                 <X size={18} />
               </button>
             </div>
           </div>
-
+  
           {isLoadingDetail ? (
             <p className="panel-placeholder">Loading customer details...</p>
           ) : selectedCustomer ? (
@@ -1028,8 +1095,8 @@ export function CustomersPanel() {
               onPhotosChange={photos => {
                 void handleCustomerPhotosChange(photos)
               }}
+              onOpenImageViewer={openImageViewer}
               onEditDraftChange={patch => setEditDraft(current => ({ ...current, ...patch }))}
-              onToggleEdit={() => setIsEditingDetail(true)}
               onCancelEdit={() => {
                 if (selectedCustomer) {
                   resetEditDraftFromCustomer(selectedCustomer)
@@ -1041,10 +1108,93 @@ export function CustomersPanel() {
               }}
             />
           ) : (
-            <p className="panel-placeholder">No customer detail found for this record.</p>
+            <p className="panel-placeholder">No customer detail found for this route.</p>
           )}
-        </aside>
-      ) : null}
-    </div>
+        </section>
+        {viewerOverlay}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <div className={`content-split ${route.detailId ? 'has-detail' : ''}`}>
+        <div className="content-split-main">
+          {listCard}
+        </div>
+
+        {route.detailId ? (
+          <aside className="detail-side-panel">
+            <div className="drawer-head">
+              <h3>Customer Detail</h3>
+              <div className="detail-actions-row detail-actions-row-compact">
+                <button
+                  type="button"
+                  className="icon-btn icon-btn-sm"
+                  onClick={() => setIsEditingDetail(true)}
+                  aria-label="Edit customer profile"
+                  title="Edit customer profile"
+                >
+                  <Pencil size={16} />
+                </button>
+                <button type="button" className="icon-btn" onClick={openFullDetail} aria-label="Open full screen" title="Open full screen">
+                  <Expand size={18} />
+                </button>
+                <button type="button" className="icon-btn" onClick={closeDetail} aria-label="Close detail panel" title="Close detail panel">
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {isLoadingDetail ? (
+              <p className="panel-placeholder">Loading customer details...</p>
+            ) : selectedCustomer ? (
+              <CustomerDetailContent
+                customer={selectedCustomer}
+                activity={selectedActivity}
+                purchasedPhotos={selectedPurchasedPhotos}
+                isLoadingPurchasedPhotos={isLoadingPurchasedPhotos}
+                noteDraft={noteDraft}
+                isSaving={isSaving}
+                isEditing={isEditingDetail}
+                isAddingNote={isAddingNote}
+                isShowingAllNotes={isShowingAllNotes}
+                editDraft={editDraft}
+                onNoteChange={setNoteDraft}
+                onAddNote={() => {
+                  void handleAddNote()
+                }}
+                onStartAddNote={() => setIsAddingNote(true)}
+                onCancelAddNote={() => {
+                  setIsAddingNote(false)
+                  setNoteDraft('')
+                }}
+                onToggleShowAllNotes={() => setIsShowingAllNotes(current => !current)}
+                onProfilePhotoChange={photoUrl => {
+                  void handleCustomerProfilePhotoChange(photoUrl)
+                }}
+                onPhotosChange={photos => {
+                  void handleCustomerPhotosChange(photos)
+                }}
+                onOpenImageViewer={openImageViewer}
+                onEditDraftChange={patch => setEditDraft(current => ({ ...current, ...patch }))}
+                onCancelEdit={() => {
+                  if (selectedCustomer) {
+                    resetEditDraftFromCustomer(selectedCustomer)
+                  }
+                  setIsEditingDetail(false)
+                }}
+                onSaveEdit={() => {
+                  void handleSaveCustomerProfile()
+                }}
+              />
+            ) : (
+              <p className="panel-placeholder">No customer detail found for this record.</p>
+            )}
+          </aside>
+        ) : null}
+      </div>
+      {viewerOverlay}
+    </>
   )
 }
