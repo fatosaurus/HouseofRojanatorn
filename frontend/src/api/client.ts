@@ -8,6 +8,9 @@ import type {
   CustomerActivity,
   CustomerPurchasedPhoto,
   CustomerUpsertRequest,
+  GalleryAsset,
+  GalleryAssetAttachRequest,
+  GalleryAssetCreateRequest,
   InviteDetails,
   InviteResponse,
   InventoryItem,
@@ -593,6 +596,22 @@ function mapPlatformActivity(record: UnknownRecord): PlatformActivityLog {
   }
 }
 
+function mapGalleryAsset(record: UnknownRecord): GalleryAsset {
+  return {
+    id: readString(record, 'id', 'Id') ?? '',
+    photoUrl: readString(record, 'photoUrl', 'PhotoUrl') ?? '',
+    attachedCustomerId: readString(record, 'attachedCustomerId', 'AttachedCustomerId'),
+    attachedCustomerName: readString(record, 'attachedCustomerName', 'AttachedCustomerName'),
+    attachedProjectId: readNumber(record, 'attachedProjectId', 'AttachedProjectId'),
+    attachedManufacturingCode: readString(record, 'attachedManufacturingCode', 'AttachedManufacturingCode'),
+    attachedInventoryItemId: readNumber(record, 'attachedInventoryItemId', 'AttachedInventoryItemId'),
+    attachedGemstoneCode: readString(record, 'attachedGemstoneCode', 'AttachedGemstoneCode'),
+    createdBy: readString(record, 'createdBy', 'CreatedBy'),
+    createdAtUtc: readString(record, 'createdAtUtc', 'CreatedAtUtc') ?? '',
+    updatedAtUtc: readString(record, 'updatedAtUtc', 'UpdatedAtUtc') ?? ''
+  }
+}
+
 function mapManufacturingNoteParseResponse(record: UnknownRecord): ManufacturingNoteParseResponse {
   const rawGemstones = pick<unknown[]>(record, 'gemstones', 'Gemstones') ?? []
   return {
@@ -946,6 +965,46 @@ export async function getPlatformActivity(query: PlatformActivityQuery): Promise
   const suffix = params.toString() ? `?${params}` : ''
   const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/activity${suffix}`)
   return mapPagedResponse(response, mapPlatformActivity)
+}
+
+interface GalleryQuery {
+  search?: string
+  attachment?: string
+  limit?: number
+  offset?: number
+}
+
+export async function getGalleryAssets(query: GalleryQuery): Promise<PagedResponse<GalleryAsset>> {
+  const params = new URLSearchParams()
+  if (query.search?.trim()) params.set('search', query.search.trim())
+  if (query.attachment?.trim() && query.attachment !== 'all') params.set('attachment', query.attachment.trim())
+  if (typeof query.limit === 'number') params.set('limit', String(query.limit))
+  if (typeof query.offset === 'number') params.set('offset', String(query.offset))
+  const suffix = params.toString() ? `?${params}` : ''
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/gallery${suffix}`)
+  return mapPagedResponse(response, mapGalleryAsset)
+}
+
+export async function createGalleryAsset(payload: GalleryAssetCreateRequest): Promise<GalleryAsset> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/gallery`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+  return mapGalleryAsset(response)
+}
+
+export async function attachGalleryAsset(id: string, payload: GalleryAssetAttachRequest): Promise<GalleryAsset> {
+  const response = await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/gallery/${encodeURIComponent(id)}/attach`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  })
+  return mapGalleryAsset(response)
+}
+
+export async function deleteGalleryAsset(id: string): Promise<void> {
+  await fetchJson<UnknownRecord>(`${env.apiBaseUrl}/gallery/${encodeURIComponent(id)}`, {
+    method: 'DELETE'
+  })
 }
 
 export interface ManufacturingQuery {

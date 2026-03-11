@@ -288,6 +288,31 @@ export interface PlatformActivityLog {
   route: string | null
 }
 
+export interface GalleryAsset {
+  id: string
+  photoUrl: string
+  attachedCustomerId: string | null
+  attachedCustomerName: string | null
+  attachedProjectId: number | null
+  attachedManufacturingCode: string | null
+  attachedInventoryItemId: number | null
+  attachedGemstoneCode: string | null
+  createdBy: string | null
+  createdAtUtc: string
+  updatedAtUtc: string
+}
+
+export interface GalleryAssetCreateRequest {
+  photoUrl: string
+  createdBy?: string | null
+}
+
+export interface GalleryAssetAttachRequest {
+  customerId?: string | null
+  manufacturingProjectId?: number | null
+  inventoryItemId?: number | null
+}
+
 export interface CustomerUpsertRequest {
   name: string
   nickname?: string | null

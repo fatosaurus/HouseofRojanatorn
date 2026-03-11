@@ -32,6 +32,20 @@ public interface ICustomerManufacturingSqlService
         int limit,
         int offset,
         CancellationToken cancellationToken = default);
+    Task<PagedResponse<GalleryAssetResponse>> GetGalleryAssetsAsync(
+        string? search,
+        string? attachment,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken = default);
+    Task<GalleryAssetResponse> CreateGalleryAssetAsync(
+        GalleryAssetCreateRequest request,
+        CancellationToken cancellationToken = default);
+    Task<GalleryAssetResponse?> AttachGalleryAssetAsync(
+        Guid assetId,
+        GalleryAssetAttachRequest request,
+        CancellationToken cancellationToken = default);
+    Task<bool> DeleteGalleryAssetAsync(Guid assetId, CancellationToken cancellationToken = default);
 
     Task<PagedResponse<ManufacturingProjectSummaryResponse>> GetManufacturingProjectsAsync(
         string? search,
@@ -1009,6 +1023,206 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         }
 
         return new PagedResponse<PlatformActivityLogResponse>(items, totalCount, limit, offset);
+    }
+
+    public async Task<PagedResponse<GalleryAssetResponse>> GetGalleryAssetsAsync(
+        string? search,
+        string? attachment,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken = default)
+    {
+        (limit, offset) = NormalizePaging(limit, offset);
+        var whereClause = BuildGalleryWhereClause(search, attachment);
+
+        var countSql = $"""
+            SELECT COUNT(*)
+            FROM dbo.gallery_assets ga
+            LEFT JOIN dbo.customers c ON c.id = ga.attached_customer_id
+            LEFT JOIN dbo.manufacturing_projects mp ON mp.id = ga.attached_project_id
+            LEFT JOIN dbo.inventory_items ii ON ii.id = ga.attached_inventory_item_id
+            {whereClause};
+            """;
+
+        var listSql = $"""
+            SELECT
+                ga.id,
+                ga.photo_url,
+                ga.attached_customer_id,
+                c.name AS attached_customer_name,
+                ga.attached_project_id,
+                mp.manufacturing_code AS attached_manufacturing_code,
+                ga.attached_inventory_item_id,
+                COALESCE(NULLIF(ii.gemstone_number_text, ''), CONVERT(NVARCHAR(64), ii.gemstone_number), CONVERT(NVARCHAR(64), ii.id)) AS attached_gemstone_code,
+                ga.created_by,
+                ga.created_at_utc,
+                ga.updated_at_utc
+            FROM dbo.gallery_assets ga
+            LEFT JOIN dbo.customers c ON c.id = ga.attached_customer_id
+            LEFT JOIN dbo.manufacturing_projects mp ON mp.id = ga.attached_project_id
+            LEFT JOIN dbo.inventory_items ii ON ii.id = ga.attached_inventory_item_id
+            {whereClause}
+            ORDER BY ga.created_at_utc DESC
+            OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        int totalCount;
+        await using (var countCmd = new SqlCommand(countSql, conn))
+        {
+            ApplyGalleryParams(countCmd, search, attachment);
+            totalCount = Convert.ToInt32(await countCmd.ExecuteScalarAsync(cancellationToken) ?? 0);
+        }
+
+        var items = new List<GalleryAssetResponse>();
+        await using (var listCmd = new SqlCommand(listSql, conn))
+        {
+            ApplyGalleryParams(listCmd, search, attachment);
+            listCmd.Parameters.AddWithValue("@Offset", offset);
+            listCmd.Parameters.AddWithValue("@Limit", limit);
+            await using var reader = await listCmd.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(MapGalleryAsset(reader));
+            }
+        }
+
+        return new PagedResponse<GalleryAssetResponse>(items, totalCount, limit, offset);
+    }
+
+    public async Task<GalleryAssetResponse> CreateGalleryAssetAsync(
+        GalleryAssetCreateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var photoUrl = NormalizeRequired(request.PhotoUrl, "Gallery photo is required.");
+        var createdBy = string.IsNullOrWhiteSpace(request.CreatedBy) ? null : request.CreatedBy.Trim();
+
+        const string sql = """
+            INSERT INTO dbo.gallery_assets (
+                photo_url,
+                created_by,
+                created_at_utc,
+                updated_at_utc
+            )
+            OUTPUT INSERTED.id
+            VALUES (
+                @PhotoUrl,
+                @CreatedBy,
+                SYSUTCDATETIME(),
+                SYSUTCDATETIME()
+            );
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+
+        Guid createdId;
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            cmd.Parameters.AddWithValue("@PhotoUrl", photoUrl);
+            cmd.Parameters.AddWithValue("@CreatedBy", DbNullIfEmpty(createdBy));
+            var rawId = await cmd.ExecuteScalarAsync(cancellationToken);
+            createdId = rawId is Guid value ? value : Guid.Empty;
+        }
+
+        if (createdId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Unable to create gallery asset.");
+        }
+
+        return await GetGalleryAssetByIdAsync(createdId, cancellationToken)
+            ?? throw new InvalidOperationException("Gallery asset was created but could not be loaded.");
+    }
+
+    public async Task<GalleryAssetResponse?> AttachGalleryAssetAsync(
+        Guid assetId,
+        GalleryAssetAttachRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var attachmentCount = 0;
+        if (request.CustomerId.HasValue) attachmentCount++;
+        if (request.ManufacturingProjectId.HasValue) attachmentCount++;
+        if (request.InventoryItemId.HasValue) attachmentCount++;
+
+        if (attachmentCount > 1)
+        {
+            throw new ArgumentException("Attach exactly one target at a time.");
+        }
+
+        const string sql = """
+            UPDATE dbo.gallery_assets
+            SET
+                attached_customer_id = @CustomerId,
+                attached_project_id = @ProjectId,
+                attached_inventory_item_id = @InventoryItemId,
+                updated_at_utc = SYSUTCDATETIME()
+            WHERE id = @Id;
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+        await using (var cmd = new SqlCommand(sql, conn))
+        {
+            cmd.Parameters.AddWithValue("@Id", assetId);
+            cmd.Parameters.AddWithValue("@CustomerId", DbValue(request.CustomerId));
+            cmd.Parameters.AddWithValue("@ProjectId", DbValue(request.ManufacturingProjectId));
+            cmd.Parameters.AddWithValue("@InventoryItemId", DbValue(request.InventoryItemId));
+            var affected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+            if (affected == 0)
+            {
+                return null;
+            }
+        }
+
+        return await GetGalleryAssetByIdAsync(assetId, cancellationToken);
+    }
+
+    public async Task<bool> DeleteGalleryAssetAsync(Guid assetId, CancellationToken cancellationToken = default)
+    {
+        const string sql = "DELETE FROM dbo.gallery_assets WHERE id = @Id;";
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@Id", assetId);
+        var affected = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        return affected > 0;
+    }
+
+    private async Task<GalleryAssetResponse?> GetGalleryAssetByIdAsync(Guid assetId, CancellationToken cancellationToken)
+    {
+        const string sql = """
+            SELECT
+                ga.id,
+                ga.photo_url,
+                ga.attached_customer_id,
+                c.name AS attached_customer_name,
+                ga.attached_project_id,
+                mp.manufacturing_code AS attached_manufacturing_code,
+                ga.attached_inventory_item_id,
+                COALESCE(NULLIF(ii.gemstone_number_text, ''), CONVERT(NVARCHAR(64), ii.gemstone_number), CONVERT(NVARCHAR(64), ii.id)) AS attached_gemstone_code,
+                ga.created_by,
+                ga.created_at_utc,
+                ga.updated_at_utc
+            FROM dbo.gallery_assets ga
+            LEFT JOIN dbo.customers c ON c.id = ga.attached_customer_id
+            LEFT JOIN dbo.manufacturing_projects mp ON mp.id = ga.attached_project_id
+            LEFT JOIN dbo.inventory_items ii ON ii.id = ga.attached_inventory_item_id
+            WHERE ga.id = @Id;
+            """;
+
+        await using var conn = new SqlConnection(_connectionString);
+        await conn.OpenAsync(cancellationToken);
+        await using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@Id", assetId);
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return MapGalleryAsset(reader);
     }
 
     public async Task<PagedResponse<ManufacturingProjectSummaryResponse>> GetManufacturingProjectsAsync(
@@ -2449,6 +2663,43 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
         }
     }
 
+    private static string BuildGalleryWhereClause(string? search, string? attachment)
+    {
+        var clauses = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            clauses.Add(
+                "("
+                + "c.name LIKE @Search "
+                + "OR ga.created_by LIKE @Search "
+                + "OR mp.manufacturing_code LIKE @Search "
+                + "OR CONVERT(NVARCHAR(64), ii.gemstone_number) LIKE @Search "
+                + "OR ii.gemstone_number_text LIKE @Search"
+                + ")");
+        }
+
+        if (!string.IsNullOrWhiteSpace(attachment) && !attachment.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            clauses.Add("CASE @Attachment WHEN 'unattached' THEN CASE WHEN ga.attached_customer_id IS NULL AND ga.attached_project_id IS NULL AND ga.attached_inventory_item_id IS NULL THEN 1 ELSE 0 END WHEN 'customer' THEN CASE WHEN ga.attached_customer_id IS NOT NULL THEN 1 ELSE 0 END WHEN 'manufacturing' THEN CASE WHEN ga.attached_project_id IS NOT NULL THEN 1 ELSE 0 END WHEN 'gemstone' THEN CASE WHEN ga.attached_inventory_item_id IS NOT NULL THEN 1 ELSE 0 END ELSE 1 END = 1");
+        }
+
+        return clauses.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", clauses);
+    }
+
+    private static void ApplyGalleryParams(SqlCommand command, string? search, string? attachment)
+    {
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            command.Parameters.AddWithValue("@Search", $"%{search.Trim()}%");
+        }
+
+        if (!string.IsNullOrWhiteSpace(attachment) && !attachment.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            command.Parameters.AddWithValue("@Attachment", attachment.Trim().ToLowerInvariant());
+        }
+    }
+
     private static string BuildManufacturingWhereClause(string? search, string? status, Guid? customerId)
     {
         var clauses = new List<string>();
@@ -3553,6 +3804,24 @@ public sealed class CustomerManufacturingSqlService : ICustomerManufacturingSqlS
             AttachmentUrls = DeserializeJsonArray(GetNullableString(reader, "attachment_urls_json")),
             CreatedAtUtc = GetDateTime(reader, "created_at_utc"),
             UpdatedAtUtc = GetDateTime(reader, "updated_at_utc"),
+        };
+    }
+
+    private static GalleryAssetResponse MapGalleryAsset(SqlDataReader reader)
+    {
+        return new GalleryAssetResponse
+        {
+            Id = GetGuid(reader, "id"),
+            PhotoUrl = GetString(reader, "photo_url"),
+            AttachedCustomerId = GetNullableGuid(reader, "attached_customer_id"),
+            AttachedCustomerName = GetNullableString(reader, "attached_customer_name"),
+            AttachedProjectId = GetNullableInt32(reader, "attached_project_id"),
+            AttachedManufacturingCode = GetNullableString(reader, "attached_manufacturing_code"),
+            AttachedInventoryItemId = GetNullableInt32(reader, "attached_inventory_item_id"),
+            AttachedGemstoneCode = GetNullableString(reader, "attached_gemstone_code"),
+            CreatedBy = GetNullableString(reader, "created_by"),
+            CreatedAtUtc = GetDateTime(reader, "created_at_utc"),
+            UpdatedAtUtc = GetDateTime(reader, "updated_at_utc")
         };
     }
 

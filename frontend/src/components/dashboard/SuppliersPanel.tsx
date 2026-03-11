@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Expand, Plus, X } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Expand, Plus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   createSupplier,
@@ -9,6 +9,7 @@ import {
   getSuppliers
 } from '../../api/client'
 import type { Supplier, SupplierPurchaseHistory } from '../../api/types'
+import { usePagedSelection } from '../common/usePagedSelection'
 
 const GUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -124,6 +125,7 @@ export function SuppliersPanel() {
   const route = useMemo(() => parseSuppliersRoute(location.pathname), [location.pathname])
 
   const [search, setSearch] = useState('')
+  const [segmentFilter, setSegmentFilter] = useState('all')
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
@@ -138,6 +140,22 @@ export function SuppliersPanel() {
   const [purchases, setPurchases] = useState<SupplierPurchaseHistory[]>([])
   const [purchaseDraft, setPurchaseDraft] = useState<PurchaseDraft>(EMPTY_PURCHASE_DRAFT)
 
+  const filteredSuppliers = useMemo(() => {
+    if (segmentFilter === 'with-purchases') {
+      return suppliers.filter(item => item.purchaseCount > 0)
+    }
+    if (segmentFilter === 'no-purchases') {
+      return suppliers.filter(item => item.purchaseCount === 0)
+    }
+    return suppliers
+  }, [segmentFilter, suppliers])
+
+  const supplierCollection = usePagedSelection({
+    items: filteredSuppliers,
+    getId: item => item.id,
+    initialPageSize: 10
+  })
+
   useEffect(() => {
     if (route.isInvalid) {
       navigate('/dashboard/suppliers', { replace: true })
@@ -150,7 +168,7 @@ export function SuppliersPanel() {
     try {
       const page = await getSuppliers({
         search: currentSearch,
-        limit: 150,
+        limit: 5000,
         offset: 0
       })
       setSuppliers(page.items)
@@ -366,7 +384,7 @@ export function SuppliersPanel() {
       <div className="card-head">
         <div>
           <h3>Supplier Directory</h3>
-          <p>{totalCount.toLocaleString()} suppliers loaded</p>
+          <p>{filteredSuppliers.length.toLocaleString()} of {totalCount.toLocaleString()} suppliers</p>
         </div>
         <button type="button" className="primary-btn" onClick={() => setIsCreating(current => !current)}>
           <Plus size={14} />
@@ -417,21 +435,81 @@ export function SuppliersPanel() {
         </div>
       ) : null}
 
-      <div className="single-row-filter filter-grid">
+      <div className="filter-grid">
         <input
           value={search}
           onChange={event => setSearch(event.target.value)}
           placeholder="Search supplier, contact, email, or phone"
         />
+        <select value={segmentFilter} onChange={event => setSegmentFilter(event.target.value)}>
+          <option value="all">All suppliers</option>
+          <option value="with-purchases">With purchases</option>
+          <option value="no-purchases">No purchases</option>
+        </select>
+      </div>
+
+      <div className="table-controls-row">
+        <div className="auth-mode-row table-view-switch">
+          <button type="button" className={supplierCollection.viewMode === 'table' ? 'active' : ''} onClick={() => supplierCollection.setViewMode('table')}>Table</button>
+          <button type="button" className={supplierCollection.viewMode === 'grid' ? 'active' : ''} onClick={() => supplierCollection.setViewMode('grid')}>Grid</button>
+        </div>
+        <div className="table-pagination-inline">
+          <span>{supplierCollection.selectedCount} selected</span>
+          <select value={supplierCollection.pageSize} onChange={event => supplierCollection.setPageSize(Number(event.target.value))}>
+            <option value={10}>10 / page</option>
+            <option value={50}>50 / page</option>
+            <option value={100}>100 / page</option>
+          </select>
+          <button type="button" className="icon-btn" onClick={() => supplierCollection.setPage(current => Math.max(1, current - 1))} disabled={supplierCollection.page <= 1}>
+            <ChevronLeft size={16} />
+          </button>
+          <span>{supplierCollection.page}/{supplierCollection.totalPages}</span>
+          <button type="button" className="icon-btn" onClick={() => supplierCollection.setPage(current => Math.min(supplierCollection.totalPages, current + 1))} disabled={supplierCollection.page >= supplierCollection.totalPages}>
+            <ChevronRight size={16} />
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
         <p className="panel-placeholder">Loading suppliers...</p>
+      ) : supplierCollection.pageItems.length === 0 ? (
+        <p className="panel-placeholder">No suppliers found for this filter.</p>
+      ) : supplierCollection.viewMode === 'grid' ? (
+        <div className="table-card-grid">
+          {supplierCollection.pageItems.map(supplier => (
+            <article key={supplier.id} className="table-card" onClick={() => openDetail(supplier.id)}>
+              <label className="table-row-checkbox" onClick={event => event.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={supplierCollection.selectedIds.has(supplier.id)}
+                  onChange={() => supplierCollection.toggleRowSelection(supplier.id)}
+                />
+              </label>
+              <h4>{supplier.name}</h4>
+              <p>{supplier.contactName ?? '-'}</p>
+              <p>{supplier.phone ?? '-'}</p>
+              <p className="accent-value">{formatCurrency(supplier.totalPurchasedAmount)}</p>
+              <span className="metric-badge">{supplier.purchaseCount}</span>
+            </article>
+          ))}
+        </div>
       ) : (
         <div className="usage-table-wrap">
           <table className="usage-table">
             <thead>
               <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    checked={supplierCollection.isPageSelected}
+                    ref={element => {
+                      if (element) {
+                        element.indeterminate = supplierCollection.isPagePartiallySelected
+                      }
+                    }}
+                    onChange={() => supplierCollection.togglePageSelection()}
+                  />
+                </th>
                 <th>Name</th>
                 <th>Contact</th>
                 <th>Phone</th>
@@ -440,8 +518,15 @@ export function SuppliersPanel() {
               </tr>
             </thead>
             <tbody>
-              {suppliers.map(supplier => (
+              {supplierCollection.pageItems.map(supplier => (
                 <tr key={supplier.id} onClick={() => openDetail(supplier.id)}>
+                  <td onClick={event => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={supplierCollection.selectedIds.has(supplier.id)}
+                      onChange={() => supplierCollection.toggleRowSelection(supplier.id)}
+                    />
+                  </td>
                   <td>{supplier.name}</td>
                   <td>{supplier.contactName ?? '-'}</td>
                   <td>{supplier.phone ?? '-'}</td>

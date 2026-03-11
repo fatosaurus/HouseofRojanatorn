@@ -237,6 +237,34 @@ public sealed class PlatformActivityLogResponse
     public string? Route { get; init; }
 }
 
+public sealed class GalleryAssetResponse
+{
+    public Guid Id { get; init; }
+    public string PhotoUrl { get; init; } = string.Empty;
+    public Guid? AttachedCustomerId { get; init; }
+    public string? AttachedCustomerName { get; init; }
+    public int? AttachedProjectId { get; init; }
+    public string? AttachedManufacturingCode { get; init; }
+    public int? AttachedInventoryItemId { get; init; }
+    public string? AttachedGemstoneCode { get; init; }
+    public string? CreatedBy { get; init; }
+    public DateTime CreatedAtUtc { get; init; }
+    public DateTime UpdatedAtUtc { get; init; }
+}
+
+public sealed class GalleryAssetCreateRequest
+{
+    public string? PhotoUrl { get; init; }
+    public string? CreatedBy { get; init; }
+}
+
+public sealed class GalleryAssetAttachRequest
+{
+    public Guid? CustomerId { get; init; }
+    public int? ManufacturingProjectId { get; init; }
+    public int? InventoryItemId { get; init; }
+}
+
 public sealed class ManufacturingGemstoneResponse
 {
     public int Id { get; init; }
