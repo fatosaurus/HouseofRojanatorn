@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Expand, X } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Expand, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getManufacturingProject, getManufacturingProjects } from '../../api/client'
 import type { ManufacturingProjectDetail, ManufacturingProjectSummary } from '../../api/types'
+import { usePagedSelection } from '../common/usePagedSelection'
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('th-TH', {
@@ -150,11 +151,30 @@ export function PurchasesPanel() {
   const route = useMemo(() => parsePurchasesRoute(location.pathname), [location.pathname])
 
   const [search, setSearch] = useState('')
+  const [pieceTypeFilter, setPieceTypeFilter] = useState('all')
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingDetail, setIsLoadingDetail] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [records, setRecords] = useState<ManufacturingProjectSummary[]>([])
   const [selectedDetail, setSelectedDetail] = useState<ManufacturingProjectDetail | null>(null)
+
+  const pieceTypeOptions = useMemo(
+    () => Array.from(new Set(records.map(record => record.pieceType ?? 'other').filter(Boolean))).sort(),
+    [records]
+  )
+
+  const filteredRecords = useMemo(() => {
+    if (pieceTypeFilter === 'all') {
+      return records
+    }
+    return records.filter(record => (record.pieceType ?? 'other') === pieceTypeFilter)
+  }, [pieceTypeFilter, records])
+
+  const recordsCollection = usePagedSelection({
+    items: filteredRecords,
+    getId: item => item.id,
+    initialPageSize: 10
+  })
 
   function beginListLoad() {
     setIsLoading(true)
@@ -185,7 +205,7 @@ export function PurchasesPanel() {
     void getManufacturingProjects({
       status: 'sold',
       search,
-      limit: 150,
+      limit: 5000,
       offset: 0
     })
       .then(page => {
@@ -281,7 +301,7 @@ export function PurchasesPanel() {
       <div className="card-head">
         <div>
           <h3>Purchase History</h3>
-          <p>{records.length.toLocaleString()} completed sold transactions</p>
+          <p>{filteredRecords.length.toLocaleString()} of {records.length.toLocaleString()} sold transactions</p>
         </div>
       </div>
 
@@ -306,17 +326,78 @@ export function PurchasesPanel() {
         </article>
       </section>
 
-      <div className="filter-grid single-row-filter">
+      <div className="filter-grid">
         <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by customer, code, piece name" />
+        <select value={pieceTypeFilter} onChange={event => setPieceTypeFilter(event.target.value)}>
+          <option value="all">All piece types</option>
+          {pieceTypeOptions.map(type => (
+            <option key={type} value={type}>{labelize(type)}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="table-controls-row">
+        <div className="auth-mode-row table-view-switch">
+          <button type="button" className={recordsCollection.viewMode === 'table' ? 'active' : ''} onClick={() => recordsCollection.setViewMode('table')}>Table</button>
+          <button type="button" className={recordsCollection.viewMode === 'grid' ? 'active' : ''} onClick={() => recordsCollection.setViewMode('grid')}>Grid</button>
+        </div>
+        <div className="table-pagination-inline">
+          <span>{recordsCollection.selectedCount} selected</span>
+          <select value={recordsCollection.pageSize} onChange={event => recordsCollection.setPageSize(Number(event.target.value))}>
+            <option value={10}>10 / page</option>
+            <option value={50}>50 / page</option>
+            <option value={100}>100 / page</option>
+          </select>
+          <button type="button" className="icon-btn" onClick={() => recordsCollection.setPage(current => Math.max(1, current - 1))} disabled={recordsCollection.page <= 1}>
+            <ChevronLeft size={16} />
+          </button>
+          <span>{recordsCollection.page}/{recordsCollection.totalPages}</span>
+          <button type="button" className="icon-btn" onClick={() => recordsCollection.setPage(current => Math.min(recordsCollection.totalPages, current + 1))} disabled={recordsCollection.page >= recordsCollection.totalPages}>
+            <ChevronRight size={16} />
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
         <p className="panel-placeholder">Loading sold transactions...</p>
+      ) : recordsCollection.pageItems.length === 0 ? (
+        <p className="panel-placeholder">No purchases found for this filter.</p>
+      ) : recordsCollection.viewMode === 'grid' ? (
+        <div className="table-card-grid">
+          {recordsCollection.pageItems.map(record => (
+            <article key={record.id} className="table-card" onClick={() => openDetail(record.id)}>
+              <label className="table-row-checkbox" onClick={event => event.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={recordsCollection.selectedIds.has(String(record.id))}
+                  onChange={() => recordsCollection.toggleRowSelection(record.id)}
+                />
+              </label>
+              <h4>{record.manufacturingCode}</h4>
+              <p>{record.pieceName}</p>
+              <p>{labelize(record.pieceType)}</p>
+              <p>{record.customerName ?? '-'}</p>
+              <p className="accent-value">{formatCurrency(record.sellingPrice)}</p>
+            </article>
+          ))}
+        </div>
       ) : (
         <div className="usage-table-wrap">
           <table className="usage-table">
             <thead>
               <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    checked={recordsCollection.isPageSelected}
+                    ref={element => {
+                      if (element) {
+                        element.indeterminate = recordsCollection.isPagePartiallySelected
+                      }
+                    }}
+                    onChange={() => recordsCollection.togglePageSelection()}
+                  />
+                </th>
                 <th>Code</th>
                 <th>Piece</th>
                 <th>Type</th>
@@ -326,8 +407,15 @@ export function PurchasesPanel() {
               </tr>
             </thead>
             <tbody>
-              {records.map(record => (
+              {recordsCollection.pageItems.map(record => (
                 <tr key={record.id} onClick={() => openDetail(record.id)}>
+                  <td onClick={event => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={recordsCollection.selectedIds.has(String(record.id))}
+                      onChange={() => recordsCollection.toggleRowSelection(record.id)}
+                    />
+                  </td>
                   <td>{record.manufacturingCode}</td>
                   <td>{record.pieceName}</td>
                   <td>{labelize(record.pieceType)}</td>

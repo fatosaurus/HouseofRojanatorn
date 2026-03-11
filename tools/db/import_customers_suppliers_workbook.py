@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ class CustomerContactRow:
     tax_id: str | None
     contact_type: str | None
     source_channel: str | None
+    branch_name: str | None
     shipping_address: str | None
     shipping_email: str | None
     shipping_phone: str | None
@@ -51,6 +53,76 @@ class SupplierContactRow:
     shipping_email: str | None
     shipping_phone: str | None
     notes: str | None
+
+
+def clip_text(value: str | None, max_length: int) -> str | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    return text[:max_length]
+
+
+def sanitize_phone(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if len(text) <= 64:
+        return text
+
+    # Data-quality guard: occasionally a full address lands in phone columns.
+    if any(char.isalpha() for char in text) or "," in text:
+        return None
+
+    return text[:64]
+
+
+def sanitize_customer_row(row: CustomerContactRow) -> CustomerContactRow:
+    return CustomerContactRow(
+        source_contact_id=row.source_contact_id,
+        name=clip_text(row.name, 180) or "Imported Customer",
+        contact_name=clip_text(row.contact_name, 120),
+        organization_name=clip_text(row.organization_name, 255),
+        address=clip_text(row.address, 400),
+        phone=sanitize_phone(row.phone),
+        email=clip_text(row.email, 255),
+        tax_id=clip_text(row.tax_id, 64),
+        contact_type=clip_text(row.contact_type, 64),
+        source_channel=clip_text(row.source_channel, 255),
+        branch_name=clip_text(row.branch_name, 120),
+        shipping_address=clip_text(row.shipping_address, 400),
+        shipping_email=clip_text(row.shipping_email, 255),
+        shipping_phone=sanitize_phone(row.shipping_phone),
+        notes=row.notes,
+    )
+
+
+def sanitize_supplier_row(row: SupplierContactRow) -> SupplierContactRow:
+    normalized_phone = sanitize_phone(row.phone)
+    normalized_address = clip_text(row.address, 400)
+    # Recover likely swapped values where an address appears in the phone column.
+    if normalized_phone is None and row.phone and len(row.phone.strip()) > 64 and normalized_address is None:
+        normalized_address = clip_text(row.phone, 400)
+
+    return SupplierContactRow(
+        source_contact_id=row.source_contact_id,
+        name=clip_text(row.name, 180) or "Imported Supplier",
+        contact_name=clip_text(row.contact_name, 180),
+        organization_name=clip_text(row.organization_name, 255),
+        branch_name=clip_text(row.branch_name, 120),
+        address=normalized_address,
+        phone=normalized_phone,
+        email=clip_text(row.email, 255),
+        tax_id=clip_text(row.tax_id, 64),
+        source_channel=clip_text(row.source_channel, 255),
+        shipping_address=clip_text(row.shipping_address, 400),
+        shipping_email=clip_text(row.shipping_email, 255),
+        shipping_phone=sanitize_phone(row.shipping_phone),
+        notes=row.notes,
+    )
 
 
 def normalize_text(value: object) -> str | None:
@@ -96,6 +168,130 @@ def parse_int(value: object) -> int | None:
         return None
 
 
+def normalize_header(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip().lower()
+    if not text:
+        return ""
+    return re.sub(r"\s+", "", text)
+
+
+def build_column_map(sheet: openpyxl.worksheet.worksheet.Worksheet) -> tuple[int | None, dict[str, int]]:
+    aliases: dict[str, set[str]] = {
+        "contact_id": {
+            "contact_id",
+            "id",
+        },
+        "contact_code": {
+            "รหัสคู่ค้า",
+            "contactcode",
+            "customercode",
+            "code",
+        },
+        "contact_name": {
+            "ชื่อ(บุคคลธรรมดา)",
+            "contact_name",
+            "contactname",
+            "name",
+        },
+        "organization_name": {
+            "องค์กร(นิติบุคคล)",
+            "organization_name",
+            "organizationname",
+            "องค์กร",
+        },
+        "branch_name": {
+            "สาขา",
+            "branch",
+            "branch_name",
+            "branchname",
+        },
+        "address": {
+            "ที่อยู่",
+            "address",
+        },
+        "phone": {
+            "โทรศัพท์",
+            "phone",
+        },
+        "email": {
+            "อีเมล์",
+            "อีเมล",
+            "email",
+            "e-mail",
+        },
+        "tax_id": {
+            "เลขที่ผู้เสียภาษี",
+            "tax_id",
+            "taxid",
+        },
+        "contact_type": {
+            "ประเภท",
+            "type",
+            "contact_type",
+            "contacttype",
+        },
+        "source_channel": {
+            "ที่มา",
+            "source",
+            "source_channel",
+            "sourcechannel",
+        },
+        "shipping_address": {
+            "ที่อยู่จัดส่ง",
+            "shipping_address",
+            "shippingaddress",
+        },
+        "shipping_email": {
+            "อีเมล์ผู้รับสินค้า",
+            "อีเมล์ผู้รับสินค้าง",
+            "shipping_email",
+            "shippingemail",
+        },
+        "shipping_phone": {
+            "โทรศัพท์ผู้รับสินค้า",
+            "shipping_phone",
+            "shippingphone",
+        },
+        "notes": {
+            "หมายเหตุ",
+            "notes",
+            "note",
+        },
+        "extra_terms": {
+            "เงื่อนไขอื่นๆ",
+            "เงื่อนไขอื่นๆ",
+            "otherterms",
+            "extra_terms",
+        },
+    }
+
+    max_header_scan_rows = min(20, sheet.max_row)
+    for row_idx in range(1, max_header_scan_rows + 1):
+        mapping: dict[str, int] = {}
+        for col_idx in range(1, sheet.max_column + 1):
+            normalized = normalize_header(sheet.cell(row_idx, col_idx).value)
+            if not normalized:
+                continue
+            for key, alias_set in aliases.items():
+                if normalized in alias_set and key not in mapping:
+                    mapping[key] = col_idx
+                    break
+
+        if "contact_id" in mapping and ("contact_name" in mapping or "organization_name" in mapping):
+            return row_idx, mapping
+
+    return None, {}
+
+
+def get_cell(sheet: openpyxl.worksheet.worksheet.Worksheet, row_idx: int, mapping: dict[str, int], key: str) -> object:
+    col_idx = mapping.get(key)
+    if col_idx is None:
+        return None
+    return sheet.cell(row_idx, col_idx).value
+
+
 def pick_name(contact_name: str | None, organization_name: str | None, fallback: str) -> str:
     for value in (organization_name, contact_name):
         if value and value.strip():
@@ -104,27 +300,44 @@ def pick_name(contact_name: str | None, organization_name: str | None, fallback:
 
 
 def parse_customers_sheet(workbook: openpyxl.Workbook) -> list[CustomerContactRow]:
-    if "Customer" not in workbook.sheetnames:
+    candidate_sheet_names = [name for name in workbook.sheetnames if name.lower() == "customer"]
+    if not candidate_sheet_names:
+        candidate_sheet_names = list(workbook.sheetnames)
+
+    sheet = None
+    header_row = None
+    header_map: dict[str, int] = {}
+    for sheet_name in candidate_sheet_names:
+        current_sheet = workbook[sheet_name]
+        current_header_row, current_header_map = build_column_map(current_sheet)
+        if current_header_row is not None:
+            sheet = current_sheet
+            header_row = current_header_row
+            header_map = current_header_map
+            break
+
+    if sheet is None or header_row is None:
         return []
 
-    sheet = workbook["Customer"]
     rows: list[CustomerContactRow] = []
     unnamed_counter = 0
-    for row_idx in range(2, sheet.max_row + 1):
-        contact_id = parse_int(sheet.cell(row_idx, 1).value)
-        contact_code = normalize_text(sheet.cell(row_idx, 2).value)
-        contact_name = normalize_text(sheet.cell(row_idx, 3).value)
-        organization_name = normalize_text(sheet.cell(row_idx, 4).value)
-        address = normalize_text(sheet.cell(row_idx, 5).value)
-        phone = normalize_text(sheet.cell(row_idx, 6).value)
-        email = normalize_text(sheet.cell(row_idx, 7).value)
-        tax_id = normalize_text(sheet.cell(row_idx, 8).value)
-        contact_type = normalize_text(sheet.cell(row_idx, 9).value)
-        source_channel = normalize_text(sheet.cell(row_idx, 10).value)
-        shipping_address = normalize_text(sheet.cell(row_idx, 11).value)
-        shipping_email = normalize_text(sheet.cell(row_idx, 12).value)
-        shipping_phone = normalize_text(sheet.cell(row_idx, 13).value)
-        note_text = normalize_text(sheet.cell(row_idx, 14).value)
+    for row_idx in range(header_row + 1, sheet.max_row + 1):
+        contact_id = parse_int(get_cell(sheet, row_idx, header_map, "contact_id"))
+        contact_code = normalize_text(get_cell(sheet, row_idx, header_map, "contact_code"))
+        contact_name = normalize_text(get_cell(sheet, row_idx, header_map, "contact_name"))
+        organization_name = normalize_text(get_cell(sheet, row_idx, header_map, "organization_name"))
+        branch_name = normalize_text(get_cell(sheet, row_idx, header_map, "branch_name"))
+        address = normalize_text(get_cell(sheet, row_idx, header_map, "address"))
+        phone = normalize_text(get_cell(sheet, row_idx, header_map, "phone"))
+        email = normalize_text(get_cell(sheet, row_idx, header_map, "email"))
+        tax_id = normalize_text(get_cell(sheet, row_idx, header_map, "tax_id"))
+        contact_type = normalize_text(get_cell(sheet, row_idx, header_map, "contact_type"))
+        source_channel = normalize_text(get_cell(sheet, row_idx, header_map, "source_channel"))
+        shipping_address = normalize_text(get_cell(sheet, row_idx, header_map, "shipping_address"))
+        shipping_email = normalize_text(get_cell(sheet, row_idx, header_map, "shipping_email"))
+        shipping_phone = normalize_text(get_cell(sheet, row_idx, header_map, "shipping_phone"))
+        note_text = normalize_text(get_cell(sheet, row_idx, header_map, "notes"))
+        extra_terms = normalize_text(get_cell(sheet, row_idx, header_map, "extra_terms"))
 
         if all(
             item is None
@@ -132,6 +345,7 @@ def parse_customers_sheet(workbook: openpyxl.Workbook) -> list[CustomerContactRo
                 contact_id,
                 contact_name,
                 organization_name,
+                branch_name,
                 address,
                 phone,
                 email,
@@ -142,6 +356,7 @@ def parse_customers_sheet(workbook: openpyxl.Workbook) -> list[CustomerContactRo
                 shipping_email,
                 shipping_phone,
                 note_text,
+                extra_terms,
             )
         ):
             continue
@@ -155,6 +370,10 @@ def parse_customers_sheet(workbook: openpyxl.Workbook) -> list[CustomerContactRo
         notes: list[str] = []
         if contact_code:
             notes.append(f"legacy_customer_code: {contact_code}")
+        if branch_name and branch_name != "#":
+            notes.append(f"branch: {branch_name}")
+        if extra_terms:
+            notes.append(f"other_terms: {extra_terms}")
         if note_text:
             notes.append(note_text)
 
@@ -170,6 +389,7 @@ def parse_customers_sheet(workbook: openpyxl.Workbook) -> list[CustomerContactRo
                 tax_id=tax_id,
                 contact_type=contact_type,
                 source_channel=source_channel,
+                branch_name=branch_name if branch_name != "#" else None,
                 shipping_address=shipping_address,
                 shipping_email=shipping_email,
                 shipping_phone=shipping_phone,
@@ -270,6 +490,8 @@ def build_import_sql(
     customer_rows: list[CustomerContactRow],
     supplier_rows: list[SupplierContactRow],
     truncate_first: bool,
+    clear_customers: bool,
+    clear_suppliers: bool,
 ) -> str:
     statements: list[str] = [
         "SET XACT_ABORT ON;",
@@ -277,13 +499,15 @@ def build_import_sql(
     ]
 
     if truncate_first:
-        statements.extend(
-            [
-                "DELETE FROM dbo.supplier_purchase_history;",
-                f"DELETE FROM dbo.suppliers WHERE source_system = {sql_literal(SOURCE_SYSTEM)};",
-                f"DELETE FROM dbo.customers WHERE source_system = {sql_literal(SOURCE_SYSTEM)};",
-            ]
-        )
+        if clear_suppliers:
+            statements.extend(
+                [
+                    "DELETE FROM dbo.supplier_purchase_history;",
+                    f"DELETE FROM dbo.suppliers WHERE source_system = {sql_literal(SOURCE_SYSTEM)};",
+                ]
+            )
+        if clear_customers:
+            statements.append(f"DELETE FROM dbo.customers WHERE source_system = {sql_literal(SOURCE_SYSTEM)};")
 
     for row in customer_rows:
         if row.source_contact_id is not None:
@@ -466,6 +690,16 @@ def main() -> int:
         help="Upsert/append workbook rows while keeping existing workbook-sourced records.",
     )
     parser.add_argument(
+        "--customers-only",
+        action="store_true",
+        help="Import only customers from workbook and leave supplier tables untouched.",
+    )
+    parser.add_argument(
+        "--suppliers-only",
+        action="store_true",
+        help="Import only suppliers from workbook and leave customer table untouched.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Parse workbook and print row counts without writing to SQL.",
@@ -481,6 +715,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.customers_only and args.suppliers_only:
+        raise ValueError("Use only one of --customers-only or --suppliers-only.")
+
     workbook_path = Path(args.excel_path).expanduser().resolve()
     if not workbook_path.exists():
         raise FileNotFoundError(f"Workbook not found: {workbook_path}")
@@ -488,6 +725,13 @@ def main() -> int:
     workbook = openpyxl.load_workbook(workbook_path, data_only=True)
     customer_rows = parse_customers_sheet(workbook)
     supplier_rows = parse_suppliers_sheet(workbook)
+    customer_rows = [sanitize_customer_row(row) for row in customer_rows]
+    supplier_rows = [sanitize_supplier_row(row) for row in supplier_rows]
+
+    if args.customers_only:
+        supplier_rows = []
+    if args.suppliers_only:
+        customer_rows = []
 
     print(f"[import] workbook: {workbook_path}")
     print(f"[import] customer rows parsed: {len(customer_rows)}")
@@ -501,6 +745,8 @@ def main() -> int:
         customer_rows=customer_rows,
         supplier_rows=supplier_rows,
         truncate_first=not args.no_truncate,
+        clear_customers=not args.suppliers_only,
+        clear_suppliers=not args.customers_only,
     )
 
     if args.skip_execute:

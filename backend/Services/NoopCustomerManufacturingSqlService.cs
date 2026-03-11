@@ -60,6 +60,28 @@ public sealed class NoopCustomerManufacturingSqlService : ICustomerManufacturing
         CancellationToken cancellationToken = default)
         => Task.FromResult(new PagedResponse<PlatformActivityLogResponse>([], 0, Math.Clamp(limit, 1, 200), Math.Max(offset, 0)));
 
+    public Task<PagedResponse<GalleryAssetResponse>> GetGalleryAssetsAsync(
+        string? search,
+        string? attachment,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new PagedResponse<GalleryAssetResponse>([], 0, Math.Clamp(limit, 1, 200), Math.Max(offset, 0)));
+
+    public Task<GalleryAssetResponse> CreateGalleryAssetAsync(
+        GalleryAssetCreateRequest request,
+        CancellationToken cancellationToken = default)
+        => Task.FromException<GalleryAssetResponse>(new InvalidOperationException("SQL connection is not configured."));
+
+    public Task<GalleryAssetResponse?> AttachGalleryAssetAsync(
+        Guid assetId,
+        GalleryAssetAttachRequest request,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult<GalleryAssetResponse?>(null);
+
+    public Task<bool> DeleteGalleryAssetAsync(Guid assetId, CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
+
     public Task<PagedResponse<ManufacturingProjectSummaryResponse>> GetManufacturingProjectsAsync(
         string? search,
         string? status,

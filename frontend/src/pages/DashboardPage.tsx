@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, BarChart3, ChevronLeft, ChevronRight, Expand, Factory, Gem, History, LogOut, Plus, Settings, ShoppingBag, Truck, Users, X } from 'lucide-react'
+import { ArrowLeft, BarChart3, ChevronLeft, ChevronRight, Expand, Factory, Gem, History, Images, LogOut, Plus, Settings, ShoppingBag, Truck, Users, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { createInventoryItem, getInventoryItem, getInventoryItems, getInventorySummary, restockInventoryItem } from '../api/client'
@@ -12,9 +12,11 @@ import { ManufacturingPanel } from '../components/dashboard/ManufacturingPanel'
 import { PurchasesPanel } from '../components/dashboard/PurchasesPanel'
 import { SettingsPanel } from '../components/dashboard/SettingsPanel'
 import { SuppliersPanel } from '../components/dashboard/SuppliersPanel'
+import { GalleryPanel } from '../components/dashboard/GalleryPanel'
+import { usePagedSelection } from '../components/common/usePagedSelection'
 
-type DashboardTab = 'customers' | 'suppliers' | 'purchases' | 'inventory' | 'manufacturing' | 'history' | 'analytics' | 'settings'
-const INVENTORY_PAGE_SIZE = 50
+type DashboardTab = 'customers' | 'suppliers' | 'purchases' | 'inventory' | 'manufacturing' | 'history' | 'gallery' | 'analytics' | 'settings'
+const INVENTORY_FETCH_PAGE_SIZE = 500
 
 const DASHBOARD_TABS: DashboardTab[] = [
   'customers',
@@ -23,6 +25,7 @@ const DASHBOARD_TABS: DashboardTab[] = [
   'inventory',
   'manufacturing',
   'history',
+  'gallery',
   'analytics',
   'settings'
 ]
@@ -34,6 +37,7 @@ const SIDEBAR_ITEMS: Array<{ tab: DashboardTab, label: string, Icon: LucideIcon 
   { tab: 'inventory', label: 'Gemstones', Icon: Gem },
   { tab: 'manufacturing', label: 'Manufacturing', Icon: Factory },
   { tab: 'history', label: 'History', Icon: History },
+  { tab: 'gallery', label: 'Gallery', Icon: Images },
   { tab: 'analytics', label: 'Analytics', Icon: BarChart3 },
   { tab: 'settings', label: 'Settings', Icon: Settings }
 ]
@@ -322,7 +326,6 @@ export function DashboardPage() {
   const [summary, setSummary] = useState<InventorySummary | null>(null)
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [inventoryTotal, setInventoryTotal] = useState(0)
-  const [inventoryOffset, setInventoryOffset] = useState(0)
 
   const [inventorySearch, setInventorySearch] = useState('')
   const [inventoryType, setInventoryType] = useState('all')
@@ -337,8 +340,12 @@ export function DashboardPage() {
   const [isLoadingSummary, setIsLoadingSummary] = useState(true)
   const [isLoadingInventory, setIsLoadingInventory] = useState(true)
   const [isLoadingInventoryDetail, setIsLoadingInventoryDetail] = useState(false)
-  const [isLoadingMoreInventory, setIsLoadingMoreInventory] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const inventoryCollection = usePagedSelection({
+    items: inventory,
+    getId: item => item.id,
+    initialPageSize: 10
+  })
 
   useEffect(() => {
     if (routeParts[0] !== 'dashboard' || !routeTab) {
@@ -386,19 +393,38 @@ export function DashboardPage() {
     setErrorMessage(null)
     setInventory([])
     setInventoryTotal(0)
-    setInventoryOffset(0)
 
     try {
-      const result = await getInventoryItems({
-        search: currentSearch,
-        type: currentType,
-        status: currentStatus,
-        limit: INVENTORY_PAGE_SIZE,
-        offset: 0
-      })
-      setInventory(result.items)
-      setInventoryTotal(result.totalCount)
-      setInventoryOffset(result.items.length)
+      const allItems: InventoryItem[] = []
+      let offset = 0
+      let totalCount = 0
+      let attempts = 0
+
+      while (attempts < 30) {
+        const result = await getInventoryItems({
+          search: currentSearch,
+          type: currentType,
+          status: currentStatus,
+          limit: INVENTORY_FETCH_PAGE_SIZE,
+          offset
+        })
+
+        totalCount = result.totalCount
+        if (result.items.length === 0) {
+          break
+        }
+
+        allItems.push(...result.items)
+        offset += result.items.length
+        attempts += 1
+
+        if (offset >= totalCount) {
+          break
+        }
+      }
+
+      setInventory(allItems)
+      setInventoryTotal(totalCount || allItems.length)
     } catch {
       setErrorMessage('Unable to load inventory records.')
     } finally {
@@ -447,33 +473,6 @@ export function DashboardPage() {
       cancelled = true
     }
   }, [activeTab, inventoryRoute.detailId])
-
-  async function loadMoreInventory() {
-    if (isLoadingInventory || isLoadingMoreInventory || inventory.length >= inventoryTotal) {
-      return
-    }
-
-    setIsLoadingMoreInventory(true)
-    setErrorMessage(null)
-
-    try {
-      const result = await getInventoryItems({
-        search: inventorySearch,
-        type: inventoryType,
-        status: inventoryStatus,
-        limit: INVENTORY_PAGE_SIZE,
-        offset: inventoryOffset
-      })
-
-      setInventory(current => [...current, ...result.items])
-      setInventoryTotal(result.totalCount)
-      setInventoryOffset(current => current + result.items.length)
-    } catch {
-      setErrorMessage('Unable to load more inventory records.')
-    } finally {
-      setIsLoadingMoreInventory(false)
-    }
-  }
 
   async function refreshInventorySummary() {
     try {
@@ -771,16 +770,80 @@ export function DashboardPage() {
           </div>
         ) : null}
 
+        <div className="table-controls-row">
+          <div className="auth-mode-row table-view-switch">
+            <button type="button" className={inventoryCollection.viewMode === 'table' ? 'active' : ''} onClick={() => inventoryCollection.setViewMode('table')}>Table</button>
+            <button type="button" className={inventoryCollection.viewMode === 'grid' ? 'active' : ''} onClick={() => inventoryCollection.setViewMode('grid')}>Grid</button>
+          </div>
+          <div className="table-pagination-inline">
+            <span>{inventoryCollection.selectedCount} selected</span>
+            <select value={inventoryCollection.pageSize} onChange={event => inventoryCollection.setPageSize(Number(event.target.value))}>
+              <option value={10}>10 / page</option>
+              <option value={50}>50 / page</option>
+              <option value={100}>100 / page</option>
+            </select>
+            <button type="button" className="icon-btn" onClick={() => inventoryCollection.setPage(current => Math.max(1, current - 1))} disabled={inventoryCollection.page <= 1}>
+              <ChevronLeft size={16} />
+            </button>
+            <span>{inventoryCollection.page}/{inventoryCollection.totalPages}</span>
+            <button type="button" className="icon-btn" onClick={() => inventoryCollection.setPage(current => Math.min(inventoryCollection.totalPages, current + 1))} disabled={inventoryCollection.page >= inventoryCollection.totalPages}>
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+
         {isLoadingInventory ? (
           <p className="panel-placeholder">Loading inventory data...</p>
-        ) : inventory.length === 0 ? (
+        ) : inventoryCollection.pageItems.length === 0 ? (
           <p className="panel-placeholder">No gemstones match the current filters.</p>
+        ) : inventoryCollection.viewMode === 'grid' ? (
+          <div className="table-card-grid">
+            {inventoryCollection.pageItems.map(item => {
+              const statusClass =
+                item.effectiveBalanceCt > 1 || item.effectiveBalancePcs > 10
+                  ? 'ok'
+                  : item.effectiveBalanceCt > 0 || item.effectiveBalancePcs > 0
+                    ? 'low'
+                    : 'out'
+
+              return (
+                <article key={item.id} className="table-card" onClick={() => openInventoryDetail(item.id)}>
+                  <label className="table-row-checkbox" onClick={event => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={inventoryCollection.selectedIds.has(String(item.id))}
+                      onChange={() => inventoryCollection.toggleRowSelection(item.id)}
+                    />
+                  </label>
+                  <h4>{item.gemstoneNumber ?? item.gemstoneNumberText ?? item.id}</h4>
+                  <p>{item.gemstoneType ?? '-'}</p>
+                  <p>{item.shape ?? '-'}</p>
+                  <p>{item.ownerName ?? '-'}</p>
+                  <p>{formatDate(item.buyingDate)}</p>
+                  <span className={`stock-pill ${statusClass}`}>
+                    {statusClass === 'ok' ? 'Available' : statusClass === 'low' ? 'Low' : 'Out'}
+                  </span>
+                </article>
+              )
+            })}
+          </div>
         ) : (
-          <>
-            <div className="usage-table-wrap">
+          <div className="usage-table-wrap">
             <table className="usage-table">
               <thead>
                 <tr>
+                  <th>
+                    <input
+                      type="checkbox"
+                      checked={inventoryCollection.isPageSelected}
+                      ref={element => {
+                        if (element) {
+                          element.indeterminate = inventoryCollection.isPagePartiallySelected
+                        }
+                      }}
+                      onChange={() => inventoryCollection.togglePageSelection()}
+                    />
+                  </th>
                   <th>Gem #</th>
                   <th>Type</th>
                   <th>Shape</th>
@@ -792,7 +855,7 @@ export function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {inventory.map(item => {
+                {inventoryCollection.pageItems.map(item => {
                   const statusClass =
                     item.effectiveBalanceCt > 1 || item.effectiveBalancePcs > 10
                       ? 'ok'
@@ -802,6 +865,13 @@ export function DashboardPage() {
 
                   return (
                     <tr key={item.id} onClick={() => openInventoryDetail(item.id)}>
+                      <td onClick={event => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={inventoryCollection.selectedIds.has(String(item.id))}
+                          onChange={() => inventoryCollection.toggleRowSelection(item.id)}
+                        />
+                      </td>
                       <td>{item.gemstoneNumber ?? item.gemstoneNumberText ?? item.id}</td>
                       <td>{item.gemstoneType ?? '-'}</td>
                       <td>{item.shape ?? '-'}</td>
@@ -819,27 +889,7 @@ export function DashboardPage() {
                 })}
               </tbody>
             </table>
-            </div>
-
-            <div className="table-footer">
-            <p>
-              Showing
-              {' '}
-              {inventory.length.toLocaleString()}
-              {' '}
-              of
-              {' '}
-              {inventoryTotal.toLocaleString()}
-              {' '}
-              records
-            </p>
-            {inventory.length < inventoryTotal ? (
-              <button type="button" className="secondary-btn" onClick={() => void loadMoreInventory()} disabled={isLoadingMoreInventory}>
-                {isLoadingMoreInventory ? 'Loading...' : 'See more'}
-              </button>
-            ) : null}
-            </div>
-          </>
+          </div>
         )}
       </>
     </section>
@@ -926,6 +976,8 @@ export function DashboardPage() {
           <AnalyticsPanel />
         ) : activeTab === 'history' ? (
           <HistoryPanel />
+        ) : activeTab === 'gallery' ? (
+          <GalleryPanel />
         ) : activeTab === 'settings' ? (
           <SettingsPanel />
         ) : activeTab === 'inventory' ? (

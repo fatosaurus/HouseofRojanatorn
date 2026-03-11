@@ -355,6 +355,90 @@ public sealed class CustomerManufacturingFunctions
         return response;
     }
 
+    [Function("GetGalleryAssets")]
+    public async Task<HttpResponseData> GetGalleryAssets(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "gallery")] HttpRequestData req)
+    {
+        var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+        var search = query["search"];
+        var attachment = query["attachment"];
+        var limit = ParseInt(query["limit"], 120);
+        var offset = ParseInt(query["offset"], 0);
+
+        var assets = await _service.GetGalleryAssetsAsync(search, attachment, limit, offset, req.FunctionContext.CancellationToken);
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(assets);
+        return response;
+    }
+
+    [Function("CreateGalleryAsset")]
+    public async Task<HttpResponseData> CreateGalleryAsset(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "gallery")] HttpRequestData req)
+    {
+        var body = await DeserializeBodyAsync<GalleryAssetCreateRequest>(req);
+        if (body is null)
+        {
+            return await BadRequestAsync(req, "Invalid gallery asset payload.");
+        }
+
+        try
+        {
+            var created = await _service.CreateGalleryAssetAsync(body, req.FunctionContext.CancellationToken);
+            var response = req.CreateResponse(HttpStatusCode.Created);
+            await response.WriteAsJsonAsync(created);
+            return response;
+        }
+        catch (ArgumentException ex)
+        {
+            return await BadRequestAsync(req, ex.Message);
+        }
+    }
+
+    [Function("AttachGalleryAsset")]
+    public async Task<HttpResponseData> AttachGalleryAsset(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "gallery/{id:guid}/attach")] HttpRequestData req,
+        Guid id)
+    {
+        var body = await DeserializeBodyAsync<GalleryAssetAttachRequest>(req);
+        if (body is null)
+        {
+            return await BadRequestAsync(req, "Invalid gallery attachment payload.");
+        }
+
+        try
+        {
+            var updated = await _service.AttachGalleryAssetAsync(id, body, req.FunctionContext.CancellationToken);
+            if (updated is null)
+            {
+                return await NotFoundAsync(req, "Gallery asset not found.");
+            }
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(updated);
+            return response;
+        }
+        catch (ArgumentException ex)
+        {
+            return await BadRequestAsync(req, ex.Message);
+        }
+    }
+
+    [Function("DeleteGalleryAsset")]
+    public async Task<HttpResponseData> DeleteGalleryAsset(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "gallery/{id:guid}")] HttpRequestData req,
+        Guid id)
+    {
+        var deleted = await _service.DeleteGalleryAssetAsync(id, req.FunctionContext.CancellationToken);
+        if (!deleted)
+        {
+            return await NotFoundAsync(req, "Gallery asset not found.");
+        }
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(new { success = true });
+        return response;
+    }
+
     [Function("GetManufacturingProjects")]
     public async Task<HttpResponseData> GetManufacturingProjects(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "manufacturing")] HttpRequestData req)

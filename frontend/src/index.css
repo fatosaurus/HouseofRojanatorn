@@ -542,6 +542,76 @@ a:focus-visible {
   grid-template-columns: minmax(260px, 2fr) minmax(190px, 1fr) minmax(190px, 1fr);
 }
 
+.table-controls-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.table-view-switch {
+  max-width: 220px;
+}
+
+.table-pagination-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  color: var(--ink-700);
+  font-size: 0.82rem;
+}
+
+.table-pagination-inline select {
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: #fff;
+  min-height: 34px;
+  padding: 0.26rem 0.48rem;
+}
+
+.table-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 0.65rem;
+}
+
+.table-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 0.8rem;
+  display: grid;
+  gap: 0.32rem;
+  cursor: pointer;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
+}
+
+.table-card:hover {
+  border-color: #ead8bb;
+  background: #fff9ef;
+}
+
+.table-card h4 {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.3;
+}
+
+.table-card p {
+  margin: 0;
+  color: var(--ink-700);
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.table-row-checkbox {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .panel-placeholder {
   margin: 0;
   color: var(--ink-700);

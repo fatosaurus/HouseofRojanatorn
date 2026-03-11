@@ -5,6 +5,7 @@ import { addCustomerNote, createCustomer, getCustomer, getCustomerActivity, getC
 import type { Customer, CustomerActivity, CustomerPurchasedPhoto } from '../../api/types'
 import { useSession } from '../../app/useSession'
 import { ImageDropzone } from '../common/ImageDropzone'
+import { usePagedSelection } from '../common/usePagedSelection'
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('th-TH', {
@@ -529,6 +530,7 @@ export function CustomersPanel() {
   const route = useMemo(() => parseCustomersRoute(location.pathname), [location.pathname])
 
   const [search, setSearch] = useState('')
+  const [segmentFilter, setSegmentFilter] = useState('all')
   const [customers, setCustomers] = useState<Customer[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
@@ -554,6 +556,22 @@ export function CustomersPanel() {
   const isViewerOpen = viewerImages.length > 0
   const viewerImage = isViewerOpen ? viewerImages[viewerIndex] : null
 
+  const filteredCustomers = useMemo(() => {
+    if (segmentFilter === 'with-purchases') {
+      return customers.filter(customer => customer.purchaseCount > 0)
+    }
+    if (segmentFilter === 'no-purchases') {
+      return customers.filter(customer => customer.purchaseCount === 0)
+    }
+    return customers
+  }, [customers, segmentFilter])
+
+  const customerCollection = usePagedSelection({
+    items: filteredCustomers,
+    getId: item => item.id,
+    initialPageSize: 10
+  })
+
   useEffect(() => {
     if (route.isInvalid) {
       navigate('/dashboard/customers', { replace: true })
@@ -567,7 +585,7 @@ export function CustomersPanel() {
     try {
       const page = await getCustomers({
         search: currentSearch,
-        limit: 120,
+        limit: 5000,
         offset: 0
       })
 
@@ -931,7 +949,7 @@ export function CustomersPanel() {
       <div className="card-head">
         <div>
           <h3>Customer Information</h3>
-          <p>{totalCount.toLocaleString()} customer profiles with spend history</p>
+          <p>{filteredCustomers.length.toLocaleString()} of {totalCount.toLocaleString()} customer profiles</p>
         </div>
         <button type="button" className="primary-btn" onClick={() => setIsCreating(current => !current)}>
           {isCreating ? 'Cancel' : (
@@ -982,17 +1000,88 @@ export function CustomersPanel() {
         </div>
       ) : null}
 
-      <div className="filter-grid single-row-filter">
+      <div className="filter-grid">
         <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search by name, nickname, email, or phone" />
+        <select value={segmentFilter} onChange={event => setSegmentFilter(event.target.value)}>
+          <option value="all">All customers</option>
+          <option value="with-purchases">With purchases</option>
+          <option value="no-purchases">No purchases</option>
+        </select>
+      </div>
+
+      <div className="table-controls-row">
+        <div className="auth-mode-row table-view-switch">
+          <button type="button" className={customerCollection.viewMode === 'table' ? 'active' : ''} onClick={() => customerCollection.setViewMode('table')}>Table</button>
+          <button type="button" className={customerCollection.viewMode === 'grid' ? 'active' : ''} onClick={() => customerCollection.setViewMode('grid')}>Grid</button>
+        </div>
+        <div className="table-pagination-inline">
+          <span>{customerCollection.selectedCount} selected</span>
+          <select value={customerCollection.pageSize} onChange={event => customerCollection.setPageSize(Number(event.target.value))}>
+            <option value={10}>10 / page</option>
+            <option value={50}>50 / page</option>
+            <option value={100}>100 / page</option>
+          </select>
+          <button type="button" className="icon-btn" onClick={() => customerCollection.setPage(current => Math.max(1, current - 1))} disabled={customerCollection.page <= 1}>
+            <ChevronLeft size={16} />
+          </button>
+          <span>{customerCollection.page}/{customerCollection.totalPages}</span>
+          <button type="button" className="icon-btn" onClick={() => customerCollection.setPage(current => Math.min(customerCollection.totalPages, current + 1))} disabled={customerCollection.page >= customerCollection.totalPages}>
+            <ChevronRight size={16} />
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
         <p className="panel-placeholder">Loading customer list...</p>
+      ) : customerCollection.pageItems.length === 0 ? (
+        <p className="panel-placeholder">No customers found for this filter.</p>
+      ) : customerCollection.viewMode === 'grid' ? (
+        <div className="table-card-grid">
+          {customerCollection.pageItems.map(customer => (
+            <article key={customer.id} className="table-card" onClick={() => openCustomer(customer.id)}>
+              <label className="table-row-checkbox" onClick={event => event.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={customerCollection.selectedIds.has(customer.id)}
+                  onChange={() => customerCollection.toggleRowSelection(customer.id)}
+                />
+              </label>
+              <div className="customer-name-cell">
+                {customerAvatarUrl(customer) ? (
+                  <span className="customer-avatar customer-avatar-photo">
+                    <img src={customerAvatarUrl(customer) ?? ''} alt={customer.name} />
+                  </span>
+                ) : (
+                  <span className="customer-avatar">{getInitial(customer.name)}</span>
+                )}
+                <div>
+                  <strong>{customer.name}</strong>
+                  {customer.nickname ? <p className="inline-subtext">{customer.nickname}</p> : null}
+                </div>
+              </div>
+              <p>{customer.email ?? '-'}</p>
+              <p>{customer.phone ?? '-'}</p>
+              <p className="accent-value">{formatCurrency(customer.totalSpent)}</p>
+            </article>
+          ))}
+        </div>
       ) : (
         <div className="usage-table-wrap">
           <table className="usage-table">
             <thead>
               <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    checked={customerCollection.isPageSelected}
+                    ref={element => {
+                      if (element) {
+                        element.indeterminate = customerCollection.isPagePartiallySelected
+                      }
+                    }}
+                    onChange={() => customerCollection.togglePageSelection()}
+                  />
+                </th>
                 <th>Name</th>
                 <th>Email</th>
                 <th>Phone</th>
@@ -1001,12 +1090,19 @@ export function CustomersPanel() {
               </tr>
             </thead>
             <tbody>
-              {customers.map(customer => (
+              {customerCollection.pageItems.map(customer => (
                 <tr
                   key={customer.id}
                   className={route.detailId === customer.id ? 'is-selected' : ''}
                   onClick={() => openCustomer(customer.id)}
                 >
+                  <td onClick={event => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={customerCollection.selectedIds.has(customer.id)}
+                      onChange={() => customerCollection.toggleRowSelection(customer.id)}
+                    />
+                  </td>
                   <td>
                     <div className="customer-name-cell">
                       {customerAvatarUrl(customer) ? (
