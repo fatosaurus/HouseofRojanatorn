@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowRight, BookOpenText, Gem, Hammer, HeartHandshake, Menu, Sparkles, X } from 'lucide-react'
+import { ArrowRight, Gem, Hammer, HeartHandshake, Menu, Sparkles, X } from 'lucide-react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   atelierDay,
@@ -9,6 +9,7 @@ import {
   bespokeOccasions,
   bespokeSteps,
   collectionCategories,
+  featuredEditorialImages,
   foundationProducts,
   foundationSupport,
   homeCollection,
@@ -178,10 +179,15 @@ function SectionHeading({
 function PieceGrid({ pieces }: { pieces: typeof homeCollection }) {
   return (
     <div className="marketing-piece-grid">
-      {pieces.map((piece, index) => (
+      {pieces.map(piece => (
         <article className="marketing-piece-card" key={piece.name}>
-          <div className={`marketing-piece-art tone-${(index % 5) + 1}`}>
-            <Gem />
+          <div className="marketing-piece-art">
+            <img
+              src={piece.imageSrc}
+              alt={piece.imageAlt}
+              loading="lazy"
+              style={{ objectPosition: piece.imagePosition ?? 'center' }}
+            />
           </div>
           <div className="marketing-piece-meta">
             <p>{piece.category}</p>
@@ -225,10 +231,25 @@ export function HomePage() {
             <span>Forty years</span>
             <strong>One house, one unbroken thread of making.</strong>
           </div>
-          <div className="marketing-orbital-mark">
-            <div />
-            <div />
-            <div />
+          <div className="marketing-hero-gallery">
+            <div className="marketing-hero-gallery-main">
+              <img
+                src={featuredEditorialImages[3].src}
+                alt={featuredEditorialImages[3].alt}
+                style={{ objectPosition: featuredEditorialImages[3].position ?? 'center' }}
+              />
+            </div>
+            <div className="marketing-hero-gallery-stack">
+              {[featuredEditorialImages[0], featuredEditorialImages[5]].map(image => (
+                <div className="marketing-hero-gallery-card" key={image.src}>
+                  <img
+                    src={image.src}
+                    alt={image.alt}
+                    style={{ objectPosition: image.position ?? 'center' }}
+                  />
+                </div>
+              ))}
+            </div>
           </div>
           <p className="marketing-hero-note">
             Every piece begins with listening, moves through drawing and sourcing, and ends only
@@ -283,7 +304,11 @@ export function HomePage() {
       <section className="marketing-section marketing-section-soft">
         <div className="marketing-story-teaser">
           <div className="marketing-story-art">
-            <Sparkles />
+            <img
+              src={featuredEditorialImages[2].src}
+              alt={featuredEditorialImages[2].alt}
+              style={{ objectPosition: featuredEditorialImages[2].position ?? 'center' }}
+            />
           </div>
           <div className="marketing-story-copy">
             <SectionHeading
@@ -551,7 +576,11 @@ export function AtelierPage() {
             />
           </div>
           <div className="marketing-art-card">
-            <Hammer />
+            <img
+              src={featuredEditorialImages[1].src}
+              alt={featuredEditorialImages[1].alt}
+              style={{ objectPosition: featuredEditorialImages[1].position ?? 'center' }}
+            />
             <p>Light, order, and quiet are treated as tools.</p>
           </div>
         </div>
@@ -807,7 +836,11 @@ export function JournalPage() {
       <section className="marketing-section">
         <div className="marketing-featured-journal">
           <div className="marketing-art-card feature">
-            <BookOpenText />
+            <img
+              src={featuredEditorialImages[4].src}
+              alt={featuredEditorialImages[4].alt}
+              style={{ objectPosition: featuredEditorialImages[4].position ?? 'center' }}
+            />
             <p>Featured essay</p>
           </div>
           <div className="marketing-story-copy">
