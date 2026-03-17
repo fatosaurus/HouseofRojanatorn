@@ -6,10 +6,11 @@ Gem inventory and usage operations app for House of Rojanatorn.
 
 - `backend/`: .NET 8 Azure Functions (JWT auth, Cosmos user repository, SQL-backed inventory APIs)
 - `frontend/`: React + Vite app with inventory + usage dashboard modules
+- `website/`: standalone React + Vite marketing website deployed to Azure Static Web Apps
 - `migrations/`: SQL schema migrations including workbook-derived inventory tables
 - `tools/db/`: SQL runners and workbook import tooling
 - `tools/cosmos/`: Cosmos provisioning and user seeding CLI
-- `.github/workflows/`: CI + backend/frontend deploy workflows
+- `.github/workflows/`: CI + backend deploy workflow + website deploy workflow
 
 ## Quick Start
 
@@ -26,6 +27,13 @@ func start
 ```bash
 npm --prefix frontend ci
 npm --prefix frontend run dev
+```
+
+4. Run marketing website:
+
+```bash
+npm --prefix website install
+npm --prefix website run dev
 ```
 
 ## Import Workbook Data
@@ -51,7 +59,8 @@ python3 tools/db/import_stock_workbook.py \
 ## Required GitHub Secrets
 
 - `AZURE_FUNCTIONAPP_PUBLISH_PROFILE`
-- `AZURE_STATIC_WEB_APPS_API_TOKEN`
+- `AZURE_STATIC_WEB_APPS_API_TOKEN_PURPLE_DUNE_053243600` (preferred)
+- `AZURE_STATIC_WEB_APPS_API_TOKEN` (legacy fallback)
 
 ## Required GitHub Variables
 
@@ -67,9 +76,9 @@ Set these Application Settings in the Function App:
 - `Jwt__Issuer=houseofrojanatorn`
 - `Jwt__Audience=houseofrojanatorn-clients`
 - `Jwt__SigningKey=<32+ byte secret>`
-- `Cors__AllowedOrigins=https://agreeable-meadow-05ce23e00.6.azurestaticapps.net`
+- `Cors__AllowedOrigins=https://purple-dune-053243600.4.azurestaticapps.net`
 
 Set Function App CORS allowed origins to:
 
-- `https://agreeable-meadow-05ce23e00.6.azurestaticapps.net`
+- `https://purple-dune-053243600.4.azurestaticapps.net`
 - `http://localhost:5173` (optional for local frontend dev)

@@ -3,6 +3,9 @@
 backend/local.settings.json
 frontend/node_modules/
 frontend/dist/
+website/node_modules/
+website/dist/
+*.tsbuildinfo
 backend/bin/
 backend/obj/
 **/bin/
