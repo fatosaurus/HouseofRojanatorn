@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { ArrowRight, Gem, Hammer, HeartHandshake, Menu, Sparkles, X } from 'lucide-react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
@@ -45,8 +45,79 @@ function usePageSetup(title: string) {
   }, [location.hash, location.pathname])
 }
 
+function useMarketingMotion() {
+  const location = useLocation()
+
+  useEffect(() => {
+    const revealTargets = Array.from(document.querySelectorAll<HTMLElement>('.marketing-reveal'))
+
+    if (!('IntersectionObserver' in window)) {
+      revealTargets.forEach(target => target.classList.add('is-visible'))
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      entries => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) {
+            return
+          }
+
+          entry.target.classList.add('is-visible')
+          observer.unobserve(entry.target)
+        })
+      },
+      {
+        threshold: 0.2,
+        rootMargin: '0px 0px -10% 0px'
+      }
+    )
+
+    revealTargets.forEach(target => observer.observe(target))
+
+    return () => observer.disconnect()
+  }, [location.pathname])
+
+  useEffect(() => {
+    const parallaxTargets = Array.from(document.querySelectorAll<HTMLElement>('[data-parallax]'))
+
+    if (!parallaxTargets.length) {
+      return
+    }
+
+    const updateParallax = () => {
+      const viewportHeight = window.innerHeight || 1
+
+      parallaxTargets.forEach(target => {
+        const rect = target.getBoundingClientRect()
+        const depth = Number(target.dataset.parallax ?? '28')
+        const progress = ((rect.top + rect.height / 2) - viewportHeight / 2) / viewportHeight
+        const offset = progress * depth * -1
+
+        target.style.setProperty('--parallax-shift', `${offset.toFixed(2)}px`)
+      })
+    }
+
+    updateParallax()
+    window.addEventListener('scroll', updateParallax, { passive: true })
+    window.addEventListener('resize', updateParallax)
+
+    return () => {
+      window.removeEventListener('scroll', updateParallax)
+      window.removeEventListener('resize', updateParallax)
+    }
+  }, [location.pathname])
+}
+
+function staggerStyle(index: number, step = 90, base = 0): CSSProperties {
+  return {
+    '--reveal-delay': `${base + index * step}ms`
+  } as CSSProperties
+}
+
 function PageFrame({ title, children }: { title: string; children: ReactNode }) {
   usePageSetup(title)
+  useMarketingMotion()
 
   return (
     <div className="marketing-page">
@@ -165,7 +236,7 @@ function SectionHeading({
   body?: string
 }) {
   return (
-    <div className="marketing-heading">
+    <div className="marketing-heading marketing-reveal">
       <p className="marketing-eyebrow">{eyebrow}</p>
       <h2>
         {title}
@@ -179,9 +250,9 @@ function SectionHeading({
 function PieceGrid({ pieces }: { pieces: typeof homeCollection }) {
   return (
     <div className="marketing-piece-grid">
-      {pieces.map(piece => (
-        <article className="marketing-piece-card" key={piece.name}>
-          <div className="marketing-piece-art">
+      {pieces.map((piece, index) => (
+        <article className="marketing-piece-card marketing-reveal" key={piece.name} style={staggerStyle(index)}>
+          <div className="marketing-piece-art" data-parallax="18">
             <img
               src={piece.imageSrc}
               alt={piece.imageAlt}
@@ -205,7 +276,7 @@ export function HomePage() {
   return (
     <PageFrame title="House of Rojanatorn - Jewels of Intention">
       <section className="marketing-hero">
-        <div className="marketing-hero-dark">
+        <div className="marketing-hero-dark marketing-reveal">
           <p className="marketing-overline">Bangkok atelier since 1984</p>
           <h1>
             Jewels of intention.
@@ -226,13 +297,13 @@ export function HomePage() {
           </div>
         </div>
 
-        <div className="marketing-hero-light">
-          <div className="marketing-stat-card">
+        <div className="marketing-hero-light marketing-reveal" style={staggerStyle(1, 120, 80)}>
+          <div className="marketing-stat-card marketing-reveal" style={staggerStyle(0, 0, 220)}>
             <span>Forty years</span>
             <strong>One house, one unbroken thread of making.</strong>
           </div>
           <div className="marketing-hero-gallery">
-            <div className="marketing-hero-gallery-main">
+            <div className="marketing-hero-gallery-main marketing-reveal" data-parallax="22" style={staggerStyle(0, 0, 280)}>
               <img
                 src={featuredEditorialImages[3].src}
                 alt={featuredEditorialImages[3].alt}
@@ -240,8 +311,13 @@ export function HomePage() {
               />
             </div>
             <div className="marketing-hero-gallery-stack">
-              {[featuredEditorialImages[0], featuredEditorialImages[5]].map(image => (
-                <div className="marketing-hero-gallery-card" key={image.src}>
+              {[featuredEditorialImages[0], featuredEditorialImages[5]].map((image, index) => (
+                <div
+                  className="marketing-hero-gallery-card marketing-reveal"
+                  key={image.src}
+                  data-parallax="18"
+                  style={staggerStyle(index, 110, 360)}
+                >
                   <img
                     src={image.src}
                     alt={image.alt}
@@ -251,7 +327,7 @@ export function HomePage() {
               ))}
             </div>
           </div>
-          <p className="marketing-hero-note">
+          <p className="marketing-hero-note marketing-reveal" style={staggerStyle(0, 0, 430)}>
             Every piece begins with listening, moves through drawing and sourcing, and ends only
             when the object feels resolved in the hand and on the body.
           </p>
@@ -259,14 +335,14 @@ export function HomePage() {
       </section>
 
       <section className="marketing-section marketing-section-dark">
-        <div className="marketing-split-header">
+        <div className="marketing-split-header marketing-section-intro">
           <SectionHeading
             eyebrow="The collection"
             title="A language of sculpted forms and"
             accent=" luminous materials."
             body="Each piece is conceived as an individual composition, not a variation line. The collection moves between ceremonial scale and intimate everyday wear."
           />
-          <Link className="marketing-outline-link light" to="/collection">
+          <Link className="marketing-outline-link light marketing-reveal" to="/collection" style={staggerStyle(0, 0, 120)}>
             View all pieces
           </Link>
         </div>
@@ -275,7 +351,7 @@ export function HomePage() {
 
       <section className="marketing-section">
         <div className="marketing-two-column">
-          <div className="marketing-panel">
+          <div className="marketing-panel marketing-reveal">
             <SectionHeading
               eyebrow="The bespoke journey"
               title="How a jewel comes to"
@@ -287,8 +363,8 @@ export function HomePage() {
             </Link>
           </div>
           <div className="marketing-step-list">
-            {bespokeSteps.map(step => (
-              <article className="marketing-step-card" key={step.number}>
+            {bespokeSteps.map((step, index) => (
+              <article className="marketing-step-card marketing-reveal" key={step.number} style={staggerStyle(index, 100, 80)}>
                 <span>{step.number}</span>
                 <div>
                   <h3>{step.title}</h3>
@@ -303,14 +379,14 @@ export function HomePage() {
 
       <section className="marketing-section marketing-section-soft">
         <div className="marketing-story-teaser">
-          <div className="marketing-story-art">
+          <div className="marketing-story-art marketing-reveal" data-parallax="20">
             <img
               src={featuredEditorialImages[2].src}
               alt={featuredEditorialImages[2].alt}
               style={{ objectPosition: featuredEditorialImages[2].position ?? 'center' }}
             />
           </div>
-          <div className="marketing-story-copy">
+          <div className="marketing-story-copy marketing-reveal" style={staggerStyle(0, 0, 100)}>
             <SectionHeading
               eyebrow="The Rojanatorn story"
               title="A house built on"
@@ -326,20 +402,20 @@ export function HomePage() {
       </section>
 
       <section className="marketing-section marketing-section-dark">
-        <div className="marketing-split-header">
+        <div className="marketing-split-header marketing-section-intro">
           <SectionHeading
             eyebrow="The art of making"
             title="An atelier arranged around discipline,"
             accent=" patience, and light."
             body="The studio is neither showroom nor factory. It is a working environment built to help craftsmen focus for hours at a time."
           />
-          <Link className="marketing-outline-link light" to="/atelier">
+          <Link className="marketing-outline-link light marketing-reveal" to="/atelier" style={staggerStyle(0, 0, 120)}>
             Visit the atelier
           </Link>
         </div>
         <div className="marketing-feature-grid">
-          {atelierHighlights.map(item => (
-            <article className="marketing-feature-card" key={item.title}>
+          {atelierHighlights.map((item, index) => (
+            <article className="marketing-feature-card marketing-reveal" key={item.title} style={staggerStyle(index, 100, 80)}>
               <Hammer />
               <h3>{item.title}</h3>
               <p>{item.description}</p>
@@ -349,20 +425,20 @@ export function HomePage() {
       </section>
 
       <section className="marketing-section">
-        <div className="marketing-split-header">
+        <div className="marketing-split-header marketing-section-intro">
           <SectionHeading
             eyebrow="Journal"
             title="Stories of craft, stone,"
             accent=" and making."
             body="Essays and portraits from the house, written to document the thinking and hands behind the work."
           />
-          <Link className="marketing-outline-link" to="/journal">
+          <Link className="marketing-outline-link marketing-reveal" to="/journal" style={staggerStyle(0, 0, 120)}>
             Open the journal
           </Link>
         </div>
         <div className="marketing-journal-grid">
-          {journalEntries.slice(0, 3).map(entry => (
-            <article className="marketing-journal-card" key={entry.title}>
+          {journalEntries.slice(0, 3).map((entry, index) => (
+            <article className="marketing-journal-card marketing-reveal" key={entry.title} style={staggerStyle(index, 90, 80)}>
               <span>{entry.category}</span>
               <h3>{entry.title}</h3>
               <p>{entry.excerpt}</p>
@@ -374,7 +450,7 @@ export function HomePage() {
 
       <section className="marketing-section marketing-section-soft">
         <div className="marketing-two-column">
-          <div className="marketing-panel">
+          <div className="marketing-panel marketing-reveal">
             <SectionHeading
               eyebrow="Foundation"
               title="Beauty that gives"
@@ -387,11 +463,11 @@ export function HomePage() {
             </Link>
           </div>
           <div className="marketing-stat-block">
-            <div>
+            <div className="marketing-reveal" style={staggerStyle(0, 0, 80)}>
               <strong>100%</strong>
               <p>of foundation proceeds are directed toward arts education programs.</p>
             </div>
-            <div>
+            <div className="marketing-reveal" style={staggerStyle(0, 0, 180)}>
               <strong>1 idea</strong>
               <p>Making something beautiful and supporting beauty in others should not be separate acts.</p>
             </div>
@@ -406,12 +482,12 @@ export function StoryPage() {
   return (
     <PageFrame title="Our Story - House of Rojanatorn">
       <section className="marketing-page-hero story">
-        <p className="marketing-overline">Our story</p>
-        <h1>
+        <p className="marketing-overline marketing-reveal">Our story</p>
+        <h1 className="marketing-reveal" style={staggerStyle(0, 0, 60)}>
           Forty years. One house.
           <em> An unbroken thread.</em>
         </h1>
-        <p>
+        <p className="marketing-reveal" style={staggerStyle(0, 0, 120)}>
           The house began with a workbench, a point of view, and the conviction that Thai
           craftsmanship deserved to stand at the center of fine jewelry.
         </p>
@@ -419,7 +495,7 @@ export function StoryPage() {
 
       <section className="marketing-section">
         <div className="marketing-story-teaser reverse">
-          <div className="marketing-story-copy">
+          <div className="marketing-story-copy marketing-reveal">
             <SectionHeading
               eyebrow="Where it began"
               title="Bangkok,"
@@ -427,7 +503,7 @@ export function StoryPage() {
               body="Rojanatorn started quietly. The original vision was not to produce volume, but to create work with integrity, intimacy, and a strong sense of authorship."
             />
           </div>
-          <div className="marketing-quote-panel">
+          <div className="marketing-quote-panel marketing-reveal" style={staggerStyle(0, 0, 100)}>
             <p>
               A house is not built from branding first. It is built from repeated acts of care that
               clients eventually recognize as a standard.
@@ -444,8 +520,8 @@ export function StoryPage() {
           body="The shape of the house has changed over time. The underlying discipline has not."
         />
         <div className="marketing-timeline">
-          {storyTimeline.map(item => (
-            <article className="marketing-timeline-item" key={item.year}>
+          {storyTimeline.map((item, index) => (
+            <article className="marketing-timeline-item marketing-reveal" key={item.year} style={staggerStyle(index, 90, 60)}>
               <span>{item.year}</span>
               <div>
                 <h3>{item.title}</h3>
@@ -464,8 +540,8 @@ export function StoryPage() {
           body="The house continues to make decisions through a few durable principles."
         />
         <div className="marketing-feature-grid">
-          {storyValues.map(item => (
-            <article className="marketing-feature-card" key={item.title}>
+          {storyValues.map((item, index) => (
+            <article className="marketing-feature-card marketing-reveal" key={item.title} style={staggerStyle(index, 100, 80)}>
               <Gem />
               <h3>{item.title}</h3>
               <p>{item.description}</p>
@@ -476,14 +552,14 @@ export function StoryPage() {
 
       <section className="marketing-section">
         <div className="marketing-story-teaser">
-          <div className="marketing-founder-card">
+          <div className="marketing-founder-card marketing-reveal">
             <span>Founder note</span>
             <p>
               The goal was never to make jewelry that shouted. It was to make work with enough
               clarity and feeling that it would stay with a person for the rest of their life.
             </p>
           </div>
-          <div className="marketing-story-copy">
+          <div className="marketing-story-copy marketing-reveal" style={staggerStyle(0, 0, 100)}>
             <SectionHeading
               eyebrow="The house today"
               title="Still personal."
@@ -504,12 +580,12 @@ export function CollectionPage() {
   return (
     <PageFrame title="The Collection - House of Rojanatorn">
       <section className="marketing-page-hero collection">
-        <p className="marketing-overline">The collection</p>
-        <h1>
+        <p className="marketing-overline marketing-reveal">The collection</p>
+        <h1 className="marketing-reveal" style={staggerStyle(0, 0, 60)}>
           Each piece made once.
           <em> For one person.</em>
         </h1>
-        <p>
+        <p className="marketing-reveal" style={staggerStyle(0, 0, 120)}>
           The collection is shaped by emotional clarity rather than trend cycles. Forms are edited
           until they feel calm, inevitable, and lasting.
         </p>
@@ -526,7 +602,7 @@ export function CollectionPage() {
 
       <section className="marketing-section marketing-section-soft">
         <div className="marketing-two-column">
-          <div className="marketing-panel">
+          <div className="marketing-panel marketing-reveal">
             <SectionHeading
               eyebrow="Materials and sourcing"
               title="Every material chosen with"
@@ -535,11 +611,11 @@ export function CollectionPage() {
             />
           </div>
           <div className="marketing-stat-block">
-            <div>
+            <div className="marketing-reveal" style={staggerStyle(0, 0, 80)}>
               <strong>Stone-led</strong>
               <p>The design adapts to the gem, not the other way around.</p>
             </div>
-            <div>
+            <div className="marketing-reveal" style={staggerStyle(0, 0, 180)}>
               <strong>Made by hand</strong>
               <p>Form and finish are tuned manually so the final object stays singular.</p>
             </div>
@@ -554,12 +630,12 @@ export function AtelierPage() {
   return (
     <PageFrame title="The Atelier - House of Rojanatorn">
       <section className="marketing-page-hero atelier">
-        <p className="marketing-overline">The atelier</p>
-        <h1>
+        <p className="marketing-overline marketing-reveal">The atelier</p>
+        <h1 className="marketing-reveal" style={staggerStyle(0, 0, 60)}>
           Where everything
           <em> is made.</em>
         </h1>
-        <p>
+        <p className="marketing-reveal" style={staggerStyle(0, 0, 120)}>
           The Bangkok atelier is a working studio built around concentration, skill, and the slow
           resolution of detail.
         </p>
@@ -567,7 +643,7 @@ export function AtelierPage() {
 
       <section className="marketing-section">
         <div className="marketing-story-teaser">
-          <div className="marketing-story-copy">
+          <div className="marketing-story-copy marketing-reveal">
             <SectionHeading
               eyebrow="The studio"
               title="A space built for"
@@ -575,7 +651,7 @@ export function AtelierPage() {
               body="The atelier is arranged so that shaping, setting, finishing, and review can happen without noise or interruption. The environment serves the work."
             />
           </div>
-          <div className="marketing-art-card">
+          <div className="marketing-art-card marketing-reveal" data-parallax="18" style={staggerStyle(0, 0, 100)}>
             <img
               src={featuredEditorialImages[1].src}
               alt={featuredEditorialImages[1].alt}
@@ -594,8 +670,8 @@ export function AtelierPage() {
           body="The atelier is defined as much by continuity of people as by continuity of style."
         />
         <div className="marketing-feature-grid">
-          {atelierHighlights.map(item => (
-            <article className="marketing-feature-card" key={item.title}>
+          {atelierHighlights.map((item, index) => (
+            <article className="marketing-feature-card marketing-reveal" key={item.title} style={staggerStyle(index, 100, 80)}>
               <Sparkles />
               <h3>{item.title}</h3>
               <p>{item.description}</p>
@@ -612,8 +688,8 @@ export function AtelierPage() {
           body="The house uses a mix of fabrication, setting, finishing, and constant proportion checks to keep work refined."
         />
         <div className="marketing-feature-grid compact">
-          {atelierDisciplines.map(item => (
-            <article className="marketing-feature-card soft" key={item.title}>
+          {atelierDisciplines.map((item, index) => (
+            <article className="marketing-feature-card soft marketing-reveal" key={item.title} style={staggerStyle(index, 80, 60)}>
               <Gem />
               <h3>{item.title}</h3>
               <p>{item.description}</p>
@@ -624,7 +700,7 @@ export function AtelierPage() {
 
       <section className="marketing-section">
         <div className="marketing-two-column">
-          <div className="marketing-panel">
+          <div className="marketing-panel marketing-reveal">
             <SectionHeading
               eyebrow="A day in the atelier"
               title="Quiet rhythms."
@@ -633,8 +709,8 @@ export function AtelierPage() {
             />
           </div>
           <div className="marketing-step-list">
-            {atelierDay.map(step => (
-              <article className="marketing-step-card" key={step.number + step.title}>
+            {atelierDay.map((step, index) => (
+              <article className="marketing-step-card marketing-reveal" key={step.number + step.title} style={staggerStyle(index, 100, 80)}>
                 <span>{step.number}</span>
                 <div>
                   <h3>{step.title}</h3>
@@ -654,12 +730,12 @@ export function BespokePage() {
   return (
     <PageFrame title="Bespoke - House of Rojanatorn">
       <section className="marketing-page-hero bespoke">
-        <p className="marketing-overline">Bespoke</p>
-        <h1>
+        <p className="marketing-overline marketing-reveal">Bespoke</p>
+        <h1 className="marketing-reveal" style={staggerStyle(0, 0, 60)}>
           Made for you.
           <em> From the beginning.</em>
         </h1>
-        <p>
+        <p className="marketing-reveal" style={staggerStyle(0, 0, 120)}>
           Bespoke at Rojanatorn means the piece is conceived around a specific person, occasion, and
           emotional register from its very first line.
         </p>
@@ -667,7 +743,7 @@ export function BespokePage() {
 
       <section className="marketing-section">
         <div className="marketing-two-column">
-          <div className="marketing-panel">
+          <div className="marketing-panel marketing-reveal">
             <SectionHeading
               eyebrow="What bespoke means here"
               title="Not custom."
@@ -676,8 +752,8 @@ export function BespokePage() {
             />
           </div>
           <div className="marketing-step-list">
-            {bespokeSteps.map(step => (
-              <article className="marketing-step-card" key={step.number}>
+            {bespokeSteps.map((step, index) => (
+              <article className="marketing-step-card marketing-reveal" key={step.number} style={staggerStyle(index, 100, 80)}>
                 <span>{step.number}</span>
                 <div>
                   <h3>{step.title}</h3>
@@ -698,8 +774,8 @@ export function BespokePage() {
           body="Many commissions begin around a life event, but the goal is always the same: a piece that remains meaningful once the event has passed."
         />
         <div className="marketing-feature-grid">
-          {bespokeOccasions.map(item => (
-            <article className="marketing-feature-card soft" key={item.title}>
+          {bespokeOccasions.map((item, index) => (
+            <article className="marketing-feature-card soft marketing-reveal" key={item.title} style={staggerStyle(index, 100, 80)}>
               <HeartHandshake />
               <h3>{item.title}</h3>
               <p>{item.description}</p>
@@ -716,8 +792,8 @@ export function BespokePage() {
           body="The early conversation should feel clear, not intimidating."
         />
         <div className="marketing-faq-grid">
-          {bespokeFaq.map(item => (
-            <article className="marketing-faq-card" key={item.title}>
+          {bespokeFaq.map((item, index) => (
+            <article className="marketing-faq-card marketing-reveal" key={item.title} style={staggerStyle(index, 80, 60)}>
               <h3>{item.title}</h3>
               <p>{item.description}</p>
             </article>
@@ -726,7 +802,7 @@ export function BespokePage() {
       </section>
 
       <section className="marketing-section">
-        <div className="marketing-cta-banner" id="inquiry">
+        <div className="marketing-cta-banner marketing-reveal" id="inquiry">
           <div>
             <p className="marketing-eyebrow">Begin with a conversation</p>
             <h2>Private consultations are arranged case by case.</h2>
@@ -750,12 +826,12 @@ export function FoundationPage() {
   return (
     <PageFrame title="Foundation - House of Rojanatorn">
       <section className="marketing-page-hero foundation">
-        <p className="marketing-overline">Foundation</p>
-        <h1>
+        <p className="marketing-overline marketing-reveal">Foundation</p>
+        <h1 className="marketing-reveal" style={staggerStyle(0, 0, 60)}>
           Beauty that
           <em> gives back.</em>
         </h1>
-        <p>
+        <p className="marketing-reveal" style={staggerStyle(0, 0, 120)}>
           The foundation collection extends the values of the house into art education, using daily
           objects to support the next generation of makers.
         </p>
@@ -763,7 +839,7 @@ export function FoundationPage() {
 
       <section className="marketing-section" id="mission">
         <div className="marketing-two-column">
-          <div className="marketing-panel">
+          <div className="marketing-panel marketing-reveal">
             <SectionHeading
               eyebrow="Our mission"
               title="Art education for the next"
@@ -772,11 +848,11 @@ export function FoundationPage() {
             />
           </div>
           <div className="marketing-stat-block">
-            <div>
+            <div className="marketing-reveal" style={staggerStyle(0, 0, 80)}>
               <strong>100%</strong>
               <p>of foundation proceeds go directly to programs.</p>
             </div>
-            <div>
+            <div className="marketing-reveal" style={staggerStyle(0, 0, 180)}>
               <strong>Every object</strong>
               <p>is designed to feel useful, beautiful, and easy to live with.</p>
             </div>
@@ -802,8 +878,8 @@ export function FoundationPage() {
           body="The foundation is structured to make support direct and easy to understand."
         />
         <div className="marketing-step-list three-up">
-          {foundationSupport.map(item => (
-            <article className="marketing-step-card" key={item.number + item.title}>
+          {foundationSupport.map((item, index) => (
+            <article className="marketing-step-card marketing-reveal" key={item.number + item.title} style={staggerStyle(index, 100, 80)}>
               <span>{item.number}</span>
               <div>
                 <h3>{item.title}</h3>
@@ -822,12 +898,12 @@ export function JournalPage() {
   return (
     <PageFrame title="Journal - House of Rojanatorn">
       <section className="marketing-page-hero journal">
-        <p className="marketing-overline">Journal</p>
-        <h1>
+        <p className="marketing-overline marketing-reveal">Journal</p>
+        <h1 className="marketing-reveal" style={staggerStyle(0, 0, 60)}>
           Stories of craft,
           <em> stone, and making.</em>
         </h1>
-        <p>
+        <p className="marketing-reveal" style={staggerStyle(0, 0, 120)}>
           Essays from the atelier, portraits of craftsmen, and notes on why certain materials or
           methods remain worth the time they demand.
         </p>
@@ -835,7 +911,7 @@ export function JournalPage() {
 
       <section className="marketing-section">
         <div className="marketing-featured-journal">
-          <div className="marketing-art-card feature">
+          <div className="marketing-art-card feature marketing-reveal" data-parallax="18">
             <img
               src={featuredEditorialImages[4].src}
               alt={featuredEditorialImages[4].alt}
@@ -843,7 +919,7 @@ export function JournalPage() {
             />
             <p>Featured essay</p>
           </div>
-          <div className="marketing-story-copy">
+          <div className="marketing-story-copy marketing-reveal" style={staggerStyle(0, 0, 100)}>
             <span className="marketing-overline">Craft portrait</span>
             <h2>The man who has set stones for forty years</h2>
             <p>
@@ -856,8 +932,8 @@ export function JournalPage() {
 
       <section className="marketing-section marketing-section-soft">
         <div className="marketing-journal-grid">
-          {journalEntries.map(entry => (
-            <article className="marketing-journal-card" key={entry.title}>
+          {journalEntries.map((entry, index) => (
+            <article className="marketing-journal-card marketing-reveal" key={entry.title} style={staggerStyle(index, 90, 60)}>
               <span>{entry.category}</span>
               <h3>{entry.title}</h3>
               <p>{entry.excerpt}</p>
