@@ -174,6 +174,7 @@
   color: var(--mk-ink);
   display: grid;
   align-content: space-between;
+  gap: 1.25rem;
 }
 
 .marketing-overline,
@@ -312,27 +313,40 @@
   line-height: 1.05;
 }
 
-.marketing-orbital-mark {
+.marketing-hero-gallery {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(10rem, 0.85fr);
+  gap: 0.9rem;
+  align-items: stretch;
+}
+
+.marketing-hero-gallery-main,
+.marketing-hero-gallery-card {
   position: relative;
-  width: min(19rem, 80vw);
-  aspect-ratio: 1;
-  margin: 2rem auto 0;
+  overflow: hidden;
+  border-radius: 1.4rem;
+  border: 1px solid rgba(92, 66, 37, 0.12);
+  box-shadow: 0 14px 32px rgba(45, 31, 19, 0.12);
 }
 
-.marketing-orbital-mark div {
-  position: absolute;
-  inset: 0;
-  border: 1px solid rgba(90, 67, 42, 0.14);
-  border-radius: 50%;
+.marketing-hero-gallery-main {
+  min-height: 23rem;
 }
 
-.marketing-orbital-mark div:nth-child(2) {
-  inset: 1.4rem;
+.marketing-hero-gallery-stack {
+  display: grid;
+  gap: 0.9rem;
 }
 
-.marketing-orbital-mark div:nth-child(3) {
-  inset: 3rem;
-  background: radial-gradient(circle, rgba(181, 139, 88, 0.35) 0%, rgba(181, 139, 88, 0) 68%);
+.marketing-hero-gallery-card {
+  min-height: 11rem;
+}
+
+.marketing-hero-gallery img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .marketing-hero-note {
@@ -427,21 +441,17 @@
 
 .marketing-piece-art {
   min-height: 16rem;
-  display: grid;
-  place-items: center;
-  color: rgba(241, 227, 203, 0.9);
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(180deg, #6b5033, #3c2c1d);
 }
 
-.marketing-piece-art svg {
-  width: 3rem;
-  height: 3rem;
+.marketing-piece-art img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
-
-.tone-1 { background: linear-gradient(180deg, #6b5033, #3c2c1d); }
-.tone-2 { background: linear-gradient(180deg, #6a5740, #413122); }
-.tone-3 { background: linear-gradient(180deg, #856346, #493323); }
-.tone-4 { background: linear-gradient(180deg, #584635, #34271b); }
-.tone-5 { background: linear-gradient(180deg, #6e5334, #3e2e1f); }
 
 .marketing-piece-meta {
   padding: 1.2rem;
@@ -483,6 +493,8 @@
   min-height: 23rem;
   display: grid;
   place-items: center;
+  position: relative;
+  overflow: hidden;
 }
 
 .marketing-story-art {
@@ -492,12 +504,6 @@
     linear-gradient(180deg, #2f2419, #201811);
   color: rgba(235, 220, 191, 0.88);
   box-shadow: var(--mk-shadow);
-}
-
-.marketing-story-art svg,
-.marketing-art-card svg {
-  width: 4rem;
-  height: 4rem;
 }
 
 .marketing-story-copy,
@@ -556,7 +562,6 @@
 }
 
 .marketing-feature-card svg,
-.marketing-art-card svg,
 .marketing-float-dot {
   color: var(--mk-gold);
 }
@@ -617,6 +622,41 @@
 
 .marketing-featured-journal .marketing-art-card.feature {
   min-height: 20rem;
+}
+
+.marketing-story-art img,
+.marketing-art-card img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  grid-area: 1 / 1;
+}
+
+.marketing-art-card p {
+  grid-area: 1 / 1;
+  align-self: end;
+  justify-self: start;
+  position: relative;
+  z-index: 1;
+  max-width: 18rem;
+  color: #fff2de;
+  font-family: var(--mk-serif);
+  font-size: 1.4rem;
+  line-height: 1.1;
+  text-shadow: 0 10px 24px rgba(18, 11, 7, 0.55);
+}
+
+.marketing-piece-art::after,
+.marketing-story-art::after,
+.marketing-art-card::after,
+.marketing-hero-gallery-main::after,
+.marketing-hero-gallery-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(24, 18, 13, 0.02), rgba(24, 18, 13, 0.22));
+  pointer-events: none;
 }
 
 .marketing-collection-section + .marketing-collection-section {
@@ -776,6 +816,18 @@
 
   .marketing-piece-card {
     grid-column: span 6;
+  }
+
+  .marketing-hero-gallery {
+    grid-template-columns: 1fr;
+  }
+
+  .marketing-hero-gallery-main {
+    min-height: 18rem;
+  }
+
+  .marketing-hero-gallery-stack {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .marketing-feature-grid.compact,

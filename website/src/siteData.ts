@@ -8,6 +8,9 @@ export interface CollectionPiece {
   material: string
   category: string
   description: string
+  imageSrc: string
+  imageAlt: string
+  imagePosition?: string
 }
 
 export interface StepItem {
@@ -42,6 +45,12 @@ export interface CollectionCategory {
   pieces: CollectionPiece[]
 }
 
+export interface FeatureImage {
+  src: string
+  alt: string
+  position?: string
+}
+
 export const marketingNavItems: NavItem[] = [
   { label: 'Home', to: '/' },
   { label: 'Story', to: '/story' },
@@ -56,31 +65,79 @@ export const homeCollection: CollectionPiece[] = [
     name: 'The Saffron Arc',
     material: 'Yellow sapphire, hand-forged gold',
     category: 'Statement collar',
-    description: 'A wide-neck silhouette built around a graduated line of Sri Lankan sapphires.'
+    description: 'A wide-neck silhouette built around a graduated line of Sri Lankan sapphires.',
+    imageSrc: '/images/jewelry/jewelry-01.jpg',
+    imageAlt: 'Floral gemstone earrings in a forest setting',
+    imagePosition: 'center 36%'
   },
   {
     name: 'Quiet Flame',
     material: 'Mandarin garnet, brushed gold',
     category: 'Cocktail ring',
-    description: 'An intense burst of fire set low to the hand for daily wear.'
+    description: 'An intense burst of fire set low to the hand for daily wear.',
+    imageSrc: '/images/jewelry/jewelry-02.jpg',
+    imageAlt: 'Emerald earrings resting on moss',
+    imagePosition: 'center 42%'
   },
   {
     name: 'Rain Thread',
     material: 'Diamond melee, white gold',
     category: 'Drop earrings',
-    description: 'A narrow vertical composition designed to move like silk in light.'
+    description: 'A narrow vertical composition designed to move like silk in light.',
+    imageSrc: '/images/jewelry/jewelry-03.jpg',
+    imageAlt: 'Diamond necklace displayed on moss and stone',
+    imagePosition: 'center 38%'
   },
   {
     name: 'Moon Vessel',
     material: 'South Sea pearl, rose gold',
     category: 'Pendant',
-    description: 'A single pearl suspended in a sculpted cradle with almost architectural restraint.'
+    description: 'A single pearl suspended in a sculpted cradle with almost architectural restraint.',
+    imageSrc: '/images/jewelry/jewelry-04.jpg',
+    imageAlt: 'Butterfly-inspired earrings among red flowers',
+    imagePosition: 'center 42%'
   },
   {
     name: 'River Signet',
     material: 'Blue spinel, matte gold',
     category: 'Signet ring',
-    description: 'A signet language reworked with softened edges and saturated color.'
+    description: 'A signet language reworked with softened edges and saturated color.',
+    imageSrc: '/images/jewelry/jewelry-05.jpg',
+    imageAlt: 'Blue gemstone brooch on deep blue agate',
+    imagePosition: 'center 38%'
+  }
+]
+
+export const featuredEditorialImages: FeatureImage[] = [
+  {
+    src: '/images/jewelry/feature-01.jpg',
+    alt: 'Pink and green gemstone bracelet among flowers',
+    position: 'center 44%'
+  },
+  {
+    src: '/images/jewelry/feature-02.jpg',
+    alt: 'Ornate bracelet arranged across a forest branch',
+    position: 'center 44%'
+  },
+  {
+    src: '/images/jewelry/feature-03.jpg',
+    alt: 'Malachite statement necklace against moss',
+    position: 'center 48%'
+  },
+  {
+    src: '/images/jewelry/feature-04.jpg',
+    alt: 'Model wearing a black gemstone necklace',
+    position: 'center 26%'
+  },
+  {
+    src: '/images/jewelry/feature-05.jpg',
+    alt: 'Pale opal and pearl bracelet on black background',
+    position: 'center 44%'
+  },
+  {
+    src: '/images/jewelry/feature-06.jpg',
+    alt: 'Blue gemstone necklace styled on a model from the back',
+    position: 'center 28%'
   }
 ]
 
@@ -247,13 +304,19 @@ export const collectionCategories: CollectionCategory[] = [
         name: 'Golden Tide',
         material: 'Champagne diamond, yellow gold',
         category: 'Collar',
-        description: 'Broad geometry softened by hand-textured gold and low-set diamonds.'
+        description: 'Broad geometry softened by hand-textured gold and low-set diamonds.',
+        imageSrc: '/images/jewelry/jewelry-06.jpg',
+        imageAlt: 'Purple and green gemstone brooch among thistles',
+        imagePosition: 'center 42%'
       },
       {
         name: 'Halo Thread',
         material: 'Diamond, white gold',
         category: 'Pendant',
-        description: 'A narrow chain carrying a luminous center stone in a near-weightless frame.'
+        description: 'A narrow chain carrying a luminous center stone in a near-weightless frame.',
+        imageSrc: '/images/jewelry/jewelry-07.jpg',
+        imageAlt: 'Pastel gemstone necklace displayed with shells',
+        imagePosition: 'center 42%'
       }
     ]
   },
@@ -266,13 +329,19 @@ export const collectionCategories: CollectionCategory[] = [
         name: 'Ember Signet',
         material: 'Spessartite garnet, yellow gold',
         category: 'Statement ring',
-        description: 'A warm saturated center with softened shoulders and a matte finish.'
+        description: 'A warm saturated center with softened shoulders and a matte finish.',
+        imageSrc: '/images/jewelry/jewelry-08.jpg',
+        imageAlt: 'Floral brooch with butterflies in purple flowers',
+        imagePosition: 'center 40%'
       },
       {
         name: 'Still Lake',
         material: 'Blue spinel, white gold',
         category: 'Dress ring',
-        description: 'A broad stone table held in a restrained frame to let color carry the piece.'
+        description: 'A broad stone table held in a restrained frame to let color carry the piece.',
+        imageSrc: '/images/jewelry/jewelry-09.jpg',
+        imageAlt: 'Multicolored necklace styled in a botanical garden scene',
+        imagePosition: 'center 44%'
       }
     ]
   },
@@ -285,13 +354,19 @@ export const collectionCategories: CollectionCategory[] = [
         name: 'Evening Line',
         material: 'Diamond, platinum-toned gold',
         category: 'Drop earrings',
-        description: 'A linear composition tuned for long movement and sharp flashes of light.'
+        description: 'A linear composition tuned for long movement and sharp flashes of light.',
+        imageSrc: '/images/jewelry/jewelry-10.jpg',
+        imageAlt: 'Pink and green gemstone bracelet surrounded by flowers',
+        imagePosition: 'center 42%'
       },
       {
         name: 'Petal Arc',
         material: 'Pink tourmaline, rose gold',
         category: 'Stud earrings',
-        description: 'Rounded geometry with tone-on-tone warmth and a soft polished edge.'
+        description: 'Rounded geometry with tone-on-tone warmth and a soft polished edge.',
+        imageSrc: '/images/jewelry/jewelry-11.jpg',
+        imageAlt: 'Floral bracelet on a dark forest branch',
+        imagePosition: 'center 40%'
       }
     ]
   },
@@ -304,13 +379,19 @@ export const collectionCategories: CollectionCategory[] = [
         name: 'River Hinge',
         material: 'Yellow sapphire, yellow gold',
         category: 'Cuff',
-        description: 'A rigid bracelet with articulated internal balance for comfort and control.'
+        description: 'A rigid bracelet with articulated internal balance for comfort and control.',
+        imageSrc: '/images/jewelry/jewelry-12.jpg',
+        imageAlt: 'Cherry-toned earrings displayed with fruit and blue flowers',
+        imagePosition: 'center 42%'
       },
       {
         name: 'Quiet Orbit',
         material: 'Pearl, yellow gold',
         category: 'Bracelet',
-        description: 'A refined everyday piece with a single luminous point of focus.'
+        description: 'A refined everyday piece with a single luminous point of focus.',
+        imageSrc: '/images/jewelry/jewelry-13.jpg',
+        imageAlt: 'Green floral brooch with red flowers on stone',
+        imagePosition: 'center 44%'
       }
     ]
   }
@@ -355,19 +436,28 @@ export const foundationProducts: CollectionPiece[] = [
     name: 'Silk Keepsake Pouch',
     material: 'Hand-finished textile',
     category: 'Foundation object',
-    description: 'A soft everyday piece made to carry and protect treasured objects.'
+    description: 'A soft everyday piece made to carry and protect treasured objects.',
+    imageSrc: '/images/jewelry/jewelry-14.jpg',
+    imageAlt: 'Portrait cameo pendant on a black background',
+    imagePosition: 'center 34%'
   },
   {
     name: 'Porcelain Desk Bowl',
     material: 'Glazed ceramic',
     category: 'Homeware',
-    description: 'A small vessel for jewelry, notes, or the quiet rituals of a desk.'
+    description: 'A small vessel for jewelry, notes, or the quiet rituals of a desk.',
+    imageSrc: '/images/jewelry/jewelry-15.jpg',
+    imageAlt: 'Black gemstone earring worn on model',
+    imagePosition: 'center 24%'
   },
   {
     name: 'Printed Artist Scarf',
     material: 'Lightweight woven cloth',
     category: 'Wearable textile',
-    description: 'A limited object whose proceeds support arts education directly.'
+    description: 'A limited object whose proceeds support arts education directly.',
+    imageSrc: '/images/jewelry/jewelry-16.jpg',
+    imageAlt: 'Pearl and gemstone necklace on a black background',
+    imagePosition: 'center 36%'
   }
 ]
 
