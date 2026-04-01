@@ -148,35 +148,37 @@ function MarketingNav() {
 
   return (
     <header className={`marketing-nav ${scrolled ? 'is-scrolled' : ''}`}>
-      <Link className="marketing-logo" to="/">
-        House of Rojanatorn
-      </Link>
-
-      <button
-        type="button"
-        className="marketing-menu-btn"
-        aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-        aria-expanded={menuOpen}
-        onClick={() => setMenuOpen(open => !open)}
-      >
-        {menuOpen ? <X /> : <Menu />}
-      </button>
-
-      <div className={`marketing-nav-links ${menuOpen ? 'is-open' : ''}`}>
-        {marketingNavItems.map(item => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) => (isActive ? 'is-active' : undefined)}
-            end={item.to === '/'}
-            onClick={() => setMenuOpen(false)}
-          >
-            {item.label}
-          </NavLink>
-        ))}
-        <Link className="marketing-nav-cta" to="/bespoke#inquiry" onClick={() => setMenuOpen(false)}>
-          Begin a commission
+      <div className="marketing-nav-shell">
+        <Link className="marketing-logo" to="/">
+          House of Rojanatorn
         </Link>
+
+        <button
+          type="button"
+          className="marketing-menu-btn"
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen(open => !open)}
+        >
+          {menuOpen ? <X /> : <Menu />}
+        </button>
+
+        <div className={`marketing-nav-links ${menuOpen ? 'is-open' : ''}`}>
+          {marketingNavItems.map(item => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) => (isActive ? 'is-active' : undefined)}
+              end={item.to === '/'}
+              onClick={() => setMenuOpen(false)}
+            >
+              {item.label}
+            </NavLink>
+          ))}
+          <Link className="marketing-nav-cta" to="/bespoke#inquiry" onClick={() => setMenuOpen(false)}>
+            Begin a commission
+          </Link>
+        </div>
       </div>
     </header>
   )
@@ -277,23 +279,37 @@ export function HomePage() {
     <PageFrame title="House of Rojanatorn - Jewels of Intention">
       <section className="marketing-hero">
         <div className="marketing-hero-dark marketing-reveal">
-          <p className="marketing-overline">Bangkok atelier since 1984</p>
-          <h1>
-            Jewels of intention.
-            <em> Made with restraint.</em>
-          </h1>
-          <p>
-            House of Rojanatorn creates bespoke jewelry and singular pieces shaped by Thai
-            craftsmanship, emotional clarity, and a belief that beauty should feel inevitable.
-          </p>
-          <div className="marketing-hero-actions">
-            <Link className="marketing-link-cta" to="/collection">
-              Explore the collection
-              <ArrowRight />
-            </Link>
-            <Link className="marketing-subtle-link" to="/bespoke">
-              Begin a commission
-            </Link>
+          <div className="marketing-hero-ornament marketing-reveal" style={staggerStyle(0, 0, 40)}>
+            <span>House of Rojanatorn</span>
+            <span>Bangkok atelier since 1984</span>
+          </div>
+          <div className="marketing-hero-copy">
+            <p className="marketing-overline">Bangkok atelier since 1984</p>
+            <h1>
+              Jewels of
+              <span> intention.</span>
+              <em> Made with restraint.</em>
+            </h1>
+            <p>
+              House of Rojanatorn creates bespoke jewelry and singular pieces shaped by Thai
+              craftsmanship, emotional clarity, and a belief that beauty should feel inevitable.
+            </p>
+            <div className="marketing-hero-actions">
+              <Link className="marketing-link-cta" to="/collection">
+                Explore the collection
+                <ArrowRight />
+              </Link>
+              <Link className="marketing-subtle-link" to="/bespoke">
+                Begin a commission
+              </Link>
+            </div>
+          </div>
+          <div className="marketing-hero-ledger marketing-reveal" style={staggerStyle(0, 0, 180)}>
+            <div>
+              <span>Private commissions</span>
+              <strong>Jewelry conceived for one wearer at a time.</strong>
+            </div>
+            <p>Designed in conversation. Built in the Bangkok atelier. Resolved by hand.</p>
           </div>
         </div>
 
@@ -304,6 +320,7 @@ export function HomePage() {
           </div>
           <div className="marketing-hero-gallery">
             <div className="marketing-hero-gallery-main marketing-reveal" data-parallax="22" style={staggerStyle(0, 0, 280)}>
+              <div className="marketing-hero-gallery-frame" />
               <img
                 src={featuredEditorialImages[3].src}
                 alt={featuredEditorialImages[3].alt}
@@ -327,10 +344,13 @@ export function HomePage() {
               ))}
             </div>
           </div>
-          <p className="marketing-hero-note marketing-reveal" style={staggerStyle(0, 0, 430)}>
-            Every piece begins with listening, moves through drawing and sourcing, and ends only
-            when the object feels resolved in the hand and on the body.
-          </p>
+          <div className="marketing-hero-foot marketing-reveal" style={staggerStyle(0, 0, 430)}>
+            <p className="marketing-hero-note">
+              Every piece begins with listening, moves through drawing and sourcing, and ends only
+              when the object feels resolved in the hand and on the body.
+            </p>
+            <p className="marketing-hero-caption">Bespoke jewelry, singular objects, and material studies.</p>
+          </div>
         </div>
       </section>
 
